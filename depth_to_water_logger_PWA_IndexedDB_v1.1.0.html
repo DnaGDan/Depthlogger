@@ -1,0 +1,875 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Depth-to-Water Logger</title>
+<style>
+  :root{
+    --bg:#0b1020; --card:#11162a; --muted:#8ea0b5; --text:#e7eef8; --accent:#6dd3ff; --accent2:#9ef5b5;
+    --danger:#ff6b6b; --warn:#ffc857;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:linear-gradient(180deg,#0b1020,#0b142a);
+    color:var(--text); font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,'Helvetica Neue',Arial,'Noto Sans',sans-serif;
+    min-height:100vh; display:flex; flex-direction:column; align-items:center;
+  }
+  .wrap{width:clamp(320px, 92vw, 1100px); padding:20px 16px 40px}
+  header{display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:16px}
+  header h1{font-size:1.25rem; margin:0; letter-spacing:.3px}
+  .id-row{display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:14px}
+  label{font-size:.9rem; color:var(--muted)}
+  .field{display:flex; flex-direction:column; background:var(--card); border:1px solid #1e2748; padding:10px 12px; border-radius:14px}
+  .field input,.field textarea{margin-top:6px; padding:10px 12px; border-radius:10px; border:1px solid #2a3865; background:#0e1430; color:var(--text); font-size:1rem; outline:none}
+  .field textarea{min-height:72px; resize:vertical}
+  .grid{display:grid; grid-template-columns:1.2fr 1fr; gap:14px; margin-top:6px}
+  @media (max-width: 820px){ .grid{grid-template-columns:1fr} }
+  .card{background:var(--card); border:1px solid #1e2748; border-radius:16px; padding:16px}
+  .timer-box{display:flex; flex-direction:column; gap:16px}
+  .timer{font-variant-numeric:tabular-nums; font-weight:700; font-size:clamp(36px,6vw,60px); text-align:center; padding:8px 0}
+  .btn-row{display:flex; gap:10px; flex-wrap:wrap; justify-content:center}
+  button{appearance:none; border:none; cursor:pointer; border-radius:14px; padding:14px 18px; font-weight:700; letter-spacing:.25px; background:#1f2b54; color:var(--text); border:1px solid #2a3865; transition:transform .02s ease,opacity .15s ease}
+  button:hover{opacity:.95}
+  button:active{transform:translateY(1px)}
+  .btn-lg{font-size:1.05rem; padding:16px 22px; border-radius:18px}
+  .start{background:linear-gradient(180deg,#1d3e6a,#1a2f52); border-color:#2f5b93}
+  .pause{background:linear-gradient(180deg,#513a0f,#3b2b0b); border-color:#8b6b1a}
+  .stop{background:linear-gradient(180deg,#4b1920,#351017); border-color:#8a2b38}
+  .record{background:linear-gradient(180deg,#184f3a,#123a2b); border-color:#1b7a57}
+  button:disabled{opacity:.5; cursor:not-allowed}
+  .measure-row{display:flex; gap:8px; align-items:center; flex-wrap:wrap}
+  .measure-row input{flex:1 1 220px; padding:14px 12px; border-radius:14px; border:1px solid #2a3865; background:#0e1430; color:var(--text); font-size:1.05rem}
+  .measure-row .mic{width:50px; min-width:50px; padding:0; aspect-ratio:1; display:grid; place-items:center; border-radius:50%; background:#1f2b54; border:1px solid #2a3865; position:relative}
+  .mic svg{width:22px; height:22px}
+  .mic.listening{outline:3px solid var(--accent); box-shadow:0 0 0 6px #6dd3ff22}
+  .hint{font-size:.85rem; color:var(--muted); margin-top:8px}
+  table{width:100%; border-collapse:collapse; margin-top:6px; font-variant-numeric:tabular-nums}
+  thead th{position:sticky; top:0; background:#0f1530; border-bottom:1px solid #273360; padding:10px; text-align:left; color:#b8c8df}
+  tbody td{border-bottom:1px dashed #23305c; padding:10px}
+  .footer-row{display:flex; justify-content:space-between; align-items:center; gap:10px; margin-top:12px; flex-wrap:wrap}
+  .pill{font-size:.85rem; color:#cfe6ff; background:#143055; border:1px solid #2a4f86; padding:8px 12px; border-radius:999px}
+  .danger{color:#ffd9d9; background:#4b1e1e; border-color:#7a2b2b}
+  .toast{position:fixed; left:50%; bottom:20px; transform:translateX(-50%); background:#0d1938; border:1px solid #2b3d78; color:var(--text); padding:10px 14px; border-radius:12px; box-shadow:0 10px 30px rgba(0,0,0,.35); display:none; z-index:9999; font-size:.95rem}
+  .link{color:var(--accent); text-decoration:none; border-bottom:1px dotted var(--accent)}
+  .muted{color:var(--muted)}
+  .field input.warn,.field textarea.warn{border-color:var(--warn)!important; box-shadow:0 0 0 2px rgba(255,200,87,.25)}
+
+/* --- Sliding side panel for parameters --- */
+.drawer-backdrop{
+  position:fixed; inset:0; background:rgba(0,0,0,.45);
+  opacity:0; pointer-events:none; transition:opacity .2s ease; z-index:40;
+}
+.drawer{
+  position:fixed; top:0; right:0; height:100dvh; width:380px; max-width:94vw;
+  background:var(--card); border-left:1px solid #1e2748;
+  transform:translateX(100%); transition:transform .25s ease; z-index:50;
+  display:flex; flex-direction:column;
+}
+.drawer header{
+  display:flex; align-items:center; justify-content:space-between;
+  padding:14px 16px; border-bottom:1px solid #1e2748;
+}
+.drawer .content{ padding:14px; overflow:auto; gap:12px; display:flex; flex-direction:column; }
+body.drawer-open .drawer{ transform:translateX(0) }
+body.drawer-open .drawer-backdrop{ opacity:1; pointer-events:auto }
+
+/* Minor header tweak: add space for the Parameters button */
+header .actions{ display:flex; gap:8px; flex-wrap:wrap; align-items:center }
+
+/* Mobile stacking already handled below; keep buttons chunky */
+@media (max-width: 720px){
+  .wrap{width:100vw; padding:12px 12px 28px}
+  header{flex-direction:column; align-items:stretch}
+  header .actions{ justify-content:space-between }
+  .card{padding:12px; border-radius:14px}
+  .id-row{grid-template-columns:1fr !important}
+  .measure-row{display:grid; grid-template-columns:1fr 0.2fr; gap:10px; align-items:stretch}
+  input, select, textarea { font-size:16px }
+  #recordBtn{ width:100% }
+}
+
+
+/* Mic smaller: about 1/5 width, sits next to input */
+.measure-row #micBtn.mic{ width:auto; padding:10px; border-radius:12px; align-self:stretch }
+.measure-row #micBtn.mic svg{ width:22px; height:22px }
+/* Record button spans full width on its own row */
+.measure-row #recordBtn{ grid-column: 1 / -1; width:100% }
+
+</style>
+
+  <meta name="theme-color" content="#0b1020"/>
+  <link rel="manifest" href="manifest_depth_logger.webmanifest">
+  <link rel="apple-touch-icon" href="icon-192.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <script>
+    window.__APP_VERSION__ = '1.1.0';
+    (function registerSW(){
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('./sw_depth_logger_v1_1.js').catch(console.error);
+      }
+    })();
+  
+// ===== Offline Storage (IndexedDB + localStorage) v1.1.0 =====
+(function(){
+  const DB_NAME = 'depth_to_water_logger';
+  const DB_VERSION = 4;
+  const STORE = 'tests';
+  const DRAFT_ID = 'DRAFT_CURRENT';
+
+  const $ = (sel) => document.querySelector(sel);
+  const G = (name, sel) => ( (typeof globalThis[name] !== 'undefined' && globalThis[name]) ? globalThis[name] : (sel ? $(sel) : undefined) );
+
+  const locIdEl         = G('locIdEl',         '#locId');
+  const testNoEl        = G('testNoEl',        '#testNo');
+  const lenTopEl        = G('lenTopEl',        '#lengthTop');
+  const lenBottomEl     = G('lenBottomEl',     '#lengthBottom');
+  const widthTopEl      = G('widthTopEl',      '#widthTop');
+  const widthBottomEl   = G('widthBottomEl',   '#widthBottom');
+  const depthTestedEl   = G('depthTestedEl',   '#depthTested');
+  const depthExcavationEl=G('depthExcavationEl','#depthExcavation');
+  const strataEl        = G('strataEl',        '#strata');
+  const pitEl           = G('pitEl',           '#pit');
+  const depthInput      = G('depthInput',      '#depthInput');
+
+  const vrOpenEl        = G('vrOpenEl',        '#vrOpen');
+  const vrStoneEl       = G('vrStoneEl',       '#vrStone');
+  const vrOtherEl       = G('vrOtherEl',       '#vrOther');
+  const vrOtherValEl    = G('vrOtherValEl',    '#vrOtherVal');
+
+  const renderTable     = (typeof globalThis.renderTable === 'function') ? globalThis.renderTable : function(){};
+  const recomputeHead   = (typeof globalThis.recomputeHead === 'function') ? globalThis.recomputeHead : function(){};
+  const updateVoidRatioUI = (typeof globalThis.updateVoidRatioUI === 'function') ? globalThis.updateVoidRatioUI : function(){};
+  const toast           = (typeof globalThis.toast === 'function') ? globalThis.toast : function(msg){ console.log('[toast]', msg); };
+
+  const points = (Array.isArray(globalThis.points)) ? globalThis.points : (globalThis.points = []);
+
+  const LS = {
+    get(k, def=null){ try { const v = localStorage.getItem(k); return v===null ? def : JSON.parse(v); } catch { return def; } },
+    set(k, v){ try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
+  };
+  const LSK = { prefs: 'dtw.prefs', last:  'dtw.last', ver:   'dtw.version' };
+
+  (function restoreTiny(){
+    const seen = LS.get(LSK.ver);
+    if (seen !== window.__APP_VERSION__) LS.set(LSK.ver, window.__APP_VERSION__);
+    const last = LS.get(LSK.last, { locId:'', testNo:'' });
+    if (locIdEl)  locIdEl.value  = last.locId || '';
+    if (testNoEl) testNoEl.value = last.testNo || '';
+    const prefs = LS.get(LSK.prefs, { preferredVR:null });
+    const v = prefs.preferredVR;
+    if (v != null){
+      if (v === 1 && vrOpenEl) vrOpenEl.checked = true;
+      else if (v === 0.3 && vrStoneEl) vrStoneEl.checked = true;
+      else if (!isNaN(v) && vrOtherEl && vrOtherValEl){ vrOtherEl.checked = true; vrOtherValEl.disabled = false; vrOtherValEl.value = String(v); }
+      updateVoidRatioUI();
+    }
+    if (document.getElementById('ver')) document.getElementById('ver').textContent = (window.__APP_VERSION__||'?');
+  })();
+
+  function saveLast(){ LS.set(LSK.last, { locId: (locIdEl?.value||'').trim(), testNo: (testNoEl?.value||'').trim() }); }
+  locIdEl && locIdEl.addEventListener('input', saveLast);
+  testNoEl && testNoEl.addEventListener('input', saveLast);
+  function saveVRPref(){
+    let v = null;
+    if (vrOpenEl?.checked) v = 1;
+    else if (vrStoneEl?.checked) v = 0.3;
+    else if (vrOtherEl?.checked) {
+      const n = parseFloat(vrOtherValEl?.value); if (!isNaN(n)) v = n;
+    }
+    const prefs = LS.get(LSK.prefs, {}); prefs.preferredVR = v; LS.set(LSK.prefs, prefs);
+  }
+  vrOpenEl && vrOpenEl.addEventListener('change', saveVRPref);
+  vrStoneEl && vrStoneEl.addEventListener('change', saveVRPref);
+  vrOtherEl && vrOtherEl.addEventListener('change', saveVRPref);
+  vrOtherValEl && vrOtherValEl.addEventListener('input', saveVRPref);
+
+  function openDB(){
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open(DB_NAME, DB_VERSION);
+      req.onupgradeneeded = function(e){
+        const db = req.result;
+        let os;
+        if(!db.objectStoreNames.contains('tests')){
+          os = db.createObjectStore('tests', { keyPath: 'id' });
+        } else {
+          os = e.target.transaction.objectStore('tests');
+        }
+        if(!os.indexNames.contains('by_created')) os.createIndex('by_created', 'createdAt', { unique:false });
+        if(!os.indexNames.contains('by_loc')) os.createIndex('by_loc', 'locId', { unique:false });
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  }
+  let _db;
+  async function dbReady(){ return _db || (_db = await openDB()); }
+  async function idbPut(val){
+    const db = await dbReady();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction('tests', 'readwrite');
+      tx.objectStore('tests').put(val);
+      tx.oncomplete = () => resolve(true);
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+  async function idbGet(id){
+    const db = await dbReady();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction('tests', 'readonly');
+      tx.objectStore('tests').get(id).onsuccess = (e)=> resolve(e.target.result||null);
+      tx.onerror = ()=> reject(tx.error);
+    });
+  }
+  async function idbDelete(id){
+    const db = await dbReady();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction('tests', 'readwrite');
+      tx.objectStore('tests').delete(id);
+      tx.oncomplete = () => resolve(true);
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+  async function idbAllByCreatedDesc(){
+    const db = await dbReady();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction('tests', 'readonly');
+      const idx = tx.objectStore('tests').index('by_created');
+      const results = [];
+      idx.openCursor(null, 'prev').onsuccess = (e) => {
+        const c = e.target.result; if (c){ results.push(c.value); c.continue(); } else resolve(results);
+      };
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+
+  function currentParams(){
+    let vr = null;
+    if (vrOpenEl?.checked) vr = 1;
+    else if (vrStoneEl?.checked) vr = 0.3;
+    else if (vrOtherEl?.checked){
+      const n = parseFloat(vrOtherValEl?.value); vr = isNaN(n) ? null : n;
+    }
+    return {
+      lenTop:        lenTopEl?.value || '',
+      lenBottom:     lenBottomEl?.value || '',
+      widthTop:      widthTopEl?.value || '',
+      widthBottom:   widthBottomEl?.value || '',
+      depthTested:   depthTestedEl?.value || '',
+      depthExcavation: depthExcavationEl?.value || '',
+      strata:        strataEl?.value || '',
+      pit:           pitEl?.value || '',
+      voidRatio:     vr
+    };
+  }
+
+  async function saveSnapshot(){
+    const loc = (locIdEl?.value||'').trim();
+    const tno = (testNoEl?.value||'').trim();
+    if(!(loc && tno)){ (toast||console.log)('Add Location ID and Test Number first.'); return; }
+    const id = Date.now() + '_' + loc + '_' + tno;
+    const rec = {
+      id,
+      appVersion: (window.__APP_VERSION__||'?'),
+      createdAt: Date.now(),
+      locId: loc,
+      testNo: tno,
+      params: currentParams(),
+      points: (Array.isArray(points) ? points.slice(0) : [])
+    };
+    await idbPut(rec);
+    (toast||console.log)('Saved to device.');
+    renderSavedList();
+  }
+
+  function row(rec){
+    const div = document.createElement('div');
+    div.className = 'card';
+    div.style.padding = '10px';
+    const dt = new Date(rec.createdAt);
+    const meta = `${rec.locId} – ${rec.testNo} • ${dt.toLocaleDateString()} ${dt.toLocaleTimeString([], {hour12:false})}`;
+    div.innerHTML = `
+      <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap">
+        <div>
+          <div style="font-weight:700">${meta}</div>
+          <div class="muted" style="font-size:.85rem">${rec.points?.length||0} points • v${rec.appVersion||'?'}</div>
+        </div>
+        <div style="display:flex; gap:6px">
+          <button class="pill" data-act="load" data-id="${rec.id}">Load</button>
+          <button class="pill danger" data-act="del" data-id="${rec.id}">🗑</button>
+        </div>
+      </div>
+    `;
+    return div;
+  }
+
+  async function renderSavedList(){
+    const host = document.getElementById('savedList');
+    if(!host) return;
+    host.innerHTML = '';
+    const all = (await idbAllByCreatedDesc()).filter(r=> r.id !== DRAFT_ID);
+    if(all.length === 0){ host.innerHTML = '<div class="muted">No saved tests yet.</div>'; return; }
+    all.forEach(r => host.appendChild(row(r)));
+    host.onclick = async (e) => {
+      const btn = e.target.closest('button'); if(!btn) return;
+      const id = btn.getAttribute('data-id');
+      const act = btn.getAttribute('data-act');
+      if (act === 'del'){ await idbDelete(id); renderSavedList(); }
+      if (act === 'load'){
+        const d = await idbGet(id); if(!d){ (toast||console.log)('Record not found'); return; }
+        if (locIdEl) locIdEl.value = d.locId || '';
+        if (testNoEl) testNoEl.value = d.testNo || '';
+        if (lenTopEl) lenTopEl.value = d.params?.lenTop || '';
+        if (lenBottomEl) lenBottomEl.value = d.params?.lenBottom || '';
+        if (widthTopEl) widthTopEl.value = d.params?.widthTop || '';
+        if (widthBottomEl) widthBottomEl.value = d.params?.widthBottom || '';
+        if (depthTestedEl) depthTestedEl.value = d.params?.depthTested || '';
+        if (depthExcavationEl) depthExcavationEl.value = d.params?.depthExcavation || '';
+        if (strataEl) strataEl.value = d.params?.strata || '';
+        if (pitEl) pitEl.value = d.params?.pit || '';
+        const vr = d.params?.voidRatio;
+        if (typeof vr === 'number'){
+          if (vr === 1 && vrOpenEl) vrOpenEl.checked = true;
+          else if (vr === 0.3 && vrStoneEl) vrStoneEl.checked = true;
+          else if (vrOtherEl && vrOtherValEl){ vrOtherEl.checked = true; vrOtherValEl.disabled = false; vrOtherValEl.value = String(vr); }
+          updateVoidRatioUI();
+        }
+        points.length = 0; (d.points||[]).forEach(p => points.push(p));
+        renderTable(); recomputeHead();
+        LS.set(LSK.last, { locId: d.locId||'', testNo: d.testNo||'' });
+        (toast||console.log)('Loaded saved test.');
+      }
+    };
+  }
+
+  document.getElementById('saveSnapshotBtn')?.addEventListener('click', saveSnapshot);
+  document.getElementById('newTestBtn')?.addEventListener('click', function(){
+    points.length = 0; renderTable(); recomputeHead(); if (depthInput) depthInput.value = ''; (toast||console.log)('Cleared current test.');
+  });
+
+  async function autosaveDraft(){
+    const rec = {
+      id: DRAFT_ID,
+      appVersion: (window.__APP_VERSION__||'?'),
+      createdAt: Date.now(),
+      locId: (locIdEl?.value||'').trim(),
+      testNo: (testNoEl?.value||'').trim(),
+      params: currentParams(),
+      points: (Array.isArray(points) ? points.slice(0) : [])
+    };
+    try{ await idbPut(rec); } catch(_){}
+  }
+  ['input','change'].forEach(evt => {
+    [locIdEl,testNoEl,lenTopEl,lenBottomEl,widthTopEl,widthBottomEl,depthTestedEl,depthExcavationEl,strataEl,pitEl,vrOpenEl,vrStoneEl,vrOtherEl,vrOtherValEl,depthInput]
+      .filter(Boolean).forEach(el => el.addEventListener(evt, autosaveDraft));
+  });
+  const _rt = renderTable;
+  globalThis.renderTable = function(){ try{ _rt.apply(this, arguments); }catch(_){ } autosaveDraft(); };
+
+  renderSavedList();
+})();
+
+</script>
+
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>Depth-to-Water Logger <span class="muted" style="font-weight:400; font-size:.8rem">v<span id="ver">1.1.0</span></span></h1>
+      <div class="pill muted">CSV header: <strong>Clock time (local), Time (mins), Depth to water (mm)</strong></div>
+    </header>
+    <div class="actions" style="margin-bottom:10px">
+      <button id="openDrawerBtn" class="pill">⚙️ Parameters</button>
+    </div>
+    <div class="drawer-backdrop" id="drawerBackdrop"></div>
+    <aside class="drawer" id="drawer">
+      <header>
+        <div style="font-weight:700">Test Parameters</div>
+        <button id="closeDrawerBtn" class="pill danger" aria-label="Close parameters">Close</button>
+      </header>
+      <div class="content" id="drawerContent">
+        <div class="card" style="margin-bottom:12px">
+          <label style="display:block; font-weight:700; margin-bottom:8px">Saved Tests (offline)</label>
+          <div class="hint">Saved locally using IndexedDB. Tap to load; long-press the bin to delete.</div>
+          <div id="savedList" style="display:flex; flex-direction:column; gap:6px; margin-top:8px"></div>
+          <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap">
+            <button id="saveSnapshotBtn" class="pill">💾 Save snapshot</button>
+            <button id="newTestBtn" class="pill danger">🧹 New / clear</button>
+          </div>
+        </div>
+
+        <!-- parameters will be moved here on load -->
+      </div>
+    </aside>
+    
+
+    <div class="id-row">
+      <div class="field">
+        <label for="locId">Location ID</label>
+        <input id="locId" placeholder="e.g. TP12" autocomplete="off" />
+      </div>
+      <div class="field">
+        <label for="testNo">Test Number</label>
+        <input id="testNo" placeholder="e.g. Test 1" autocomplete="off" />
+      </div>
+    </div>
+
+    <div class="card" id="paramsCard" style="margin-bottom:14px">
+      <label style="display:block; font-weight:600; margin-bottom:8px">Test Parameters (all in millimetres)</label>
+      <div class="id-row" style="grid-template-columns:1fr 1fr">
+        <div class="field"><label>Length at Top (mm)</label><input id="lenTop" type="text" inputmode="decimal" placeholder="e.g. 2000" /></div>
+        <div class="field"><label>Length at Bottom (mm) <span class="muted">(defaults to top)</span></label><input id="lenBottom" type="text" inputmode="decimal" placeholder="e.g. 2000" /></div>
+      </div>
+      <div class="id-row" style="grid-template-columns:1fr 1fr">
+        <div class="field"><label>Width at Top (mm)</label><input id="widthTop" type="text" inputmode="decimal" placeholder="e.g. 600" /></div>
+        <div class="field"><label>Width at Bottom (mm) <span class="muted">(defaults to top)</span></label><input id="widthBottom" type="text" inputmode="decimal" placeholder="e.g. 600" /></div>
+      </div>
+      <div class="id-row" style="grid-template-columns:1fr 1fr">
+        <div class="field"><label>Depth Tested (Head of Water) (mm)</label><input id="depthTested" type="text" inputmode="decimal" placeholder="auto" readonly /></div>
+        <div class="field"><label>Depth of Excavation (mm)</label><input id="depthExcavation" type="text" inputmode="decimal" placeholder="e.g. 2000" /></div>
+      </div>
+      <div class="field" style="margin-top:12px">
+        <label>Void Ratio</label>
+        <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:center; margin-top:6px">
+          <label style="display:flex; gap:6px; align-items:center"><input type="radio" name="voidRatio" id="vrOpen" value="1" checked /> Open (1)</label>
+          <label style="display:flex; gap:6px; align-items:center"><input type="radio" name="voidRatio" id="vrStone" value="0.3" /> Single size stone (0.3)</label>
+          <label style="display:flex; gap:6px; align-items:center"><input type="radio" name="voidRatio" id="vrOther" value="other" /> Other
+            <input id="vrOtherVal" type="text" inputmode="decimal" placeholder="e.g. 0.45" style="width:110px" disabled />
+          </label>
+        </div>
+      </div>
+      <div class="id-row" style="grid-template-columns:1fr 1fr; margin-top:12px">
+        <div class="field"><label>Strata Description</label><textarea id="strata"></textarea></div>
+        <div class="field"><label>Pit Details</label><textarea id="pit"></textarea></div>
+      </div>
+      <div class="hint">Bottom values track the Top by default; once you edit a bottom field, it becomes independent. Typical pit ≈ 2000×600×2000 mm.</div>
+    </div>
+
+    <div class="grid">
+      <div class="card timer-box">
+        <div class="timer" id="timer">00:00:00</div>
+        <div class="btn-row">
+          <button id="startBtn" class="btn-lg start">Start</button>
+          <button id="pauseBtn" class="btn-lg pause" disabled>Pause</button>
+          <button id="stopBtn"  class="btn-lg stop" disabled>Stop</button>
+        </div>
+        <div class="hint">Timer rounds to the nearest second. Times are exported as decimal minutes (2 dp).</div>
+      </div>
+
+      <div class="card">
+        <div class="measure-row">
+          <input id="depthInput" type="text" inputmode="decimal" placeholder="Depth to Water (mm)" aria-label="Depth to Water (mm)" disabled />
+          <button id="micBtn" class="mic" title="Speak a number (e.g., 'three five zero' or '350')" disabled aria-label="Speech input">
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M12 3a3 3 0 0 1 3 3v6a3 3 0 1 1-6 0V6a3 3 0 0 1 3-3Z" stroke="currentColor" stroke-width="2"/>
+              <path d="M5 11a7 7 0 0 0 14 0M12 18v3M8 21h8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+          </button>
+          <button id="recordBtn" class="btn-lg record" disabled>Record</button>
+        </div>
+        <div class="hint" id="fallTargets">25% fall: — mm · 75% fall: — mm</div>
+        <div class="hint">Press <strong>Enter</strong> inside the field to record instantly.</div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:14px">
+      <table>
+        <thead>
+          <tr>
+            <th style=\"width:34%\">Clock time</th>
+            <th style=\"width:33%\">Time (mins)</th>
+            <th>Depth to water (mm)</th>
+          </tr>
+        </thead>
+        <tbody id="tableBody"></tbody>
+      </table>
+      <div class="footer-row">
+        <div class="pill">Points: <span id="count">0</span></div>
+        <div style="display:flex; gap:8px; flex-wrap:wrap">
+          <button id="undoBtn" class="pill danger" disabled>Undo last</button>
+          <button id="exportBtn" class="btn-lg" disabled>Export CSV</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="hint" style="margin-top:10px">Tip: file name includes Location ID & Test Number. Speech input works best in Chrome (desktop/mobile).</div>
+  </div>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+<script>
+(() => {
+  // --- State ---
+  let running = false;
+  let startEpoch = 0;      // ms at last (re)start
+  let elapsedSec = 0;      // whole seconds accumulated
+  let tickHandle = null;
+
+  /** captured points: { seconds:number, minutes:number, depth:number } */
+  const points = [];
+
+  // --- Elements ---
+  const timerEl    = document.getElementById('timer');
+  const startBtn   = document.getElementById('startBtn');
+  const pauseBtn   = document.getElementById('pauseBtn');
+  const stopBtn    = document.getElementById('stopBtn');
+  const recordBtn  = document.getElementById('recordBtn');
+  const undoBtn    = document.getElementById('undoBtn');
+  const exportBtn  = document.getElementById('exportBtn');
+  const depthInput = document.getElementById('depthInput');
+  const tableBody  = document.getElementById('tableBody');
+  const countEl    = document.getElementById('count');
+  const locIdEl    = document.getElementById('locId');
+  const testNoEl   = document.getElementById('testNo');
+  const micBtn     = document.getElementById('micBtn');
+  const toastEl    = document.getElementById('toast');
+
+  // Parameter elements
+  const lenTopEl = document.getElementById('lenTop');
+  const lenBottomEl = document.getElementById('lenBottom');
+  const widthTopEl = document.getElementById('widthTop');
+  const widthBottomEl = document.getElementById('widthBottom');
+  const depthTestedEl = document.getElementById('depthTested');
+  const depthExcavationEl = document.getElementById('depthExcavation');
+  const strataEl = document.getElementById('strata');
+  const pitEl = document.getElementById('pit');
+  const vrOpenEl = document.getElementById('vrOpen');
+  const vrStoneEl = document.getElementById('vrStone');
+  const vrOtherEl = document.getElementById('vrOther');
+  const vrOtherValEl = document.getElementById('vrOtherVal');
+
+  // --- Utils ---
+  const fmtHMS = (sec) => {
+    const s = Math.round(sec);
+    const h = Math.floor(s/3600);
+    const m = Math.floor((s%3600)/60);
+    const ss = s%60;
+    const pad = n => n.toString().padStart(2,'0');
+    return `${pad(h)}:${pad(m)}:${pad(ss)}`;
+  };
+  const toMinutes2dp = (sec) => (Math.round((sec/60)*100)/100).toFixed(2);
+  const toast = (msg, ms=1800) => { toastEl.textContent = msg; toastEl.style.display='block'; clearTimeout(toastEl._t); toastEl._t = setTimeout(()=>toastEl.style.display='none', ms); };
+  const sanitizeName = (s) => (s||'').trim().replace(/[^a-z0-9_\-]+/gi,'_').replace(/^_+|_+$/g,'') || 'log';
+  const requireIds = () => { const ok = (locIdEl.value||'').trim() && (testNoEl.value||'').trim(); if(!ok) toast('Enter Location ID and Test Number first.'); return ok; };
+
+  // --- Parameter helpers (defaults/linking & void ratio) ---
+  var lenBottomLinked = true;
+  var widthBottomLinked = true;
+
+  if (lenBottomEl && lenTopEl) { lenBottomEl.value = lenTopEl.value; }
+  if (widthBottomEl && widthTopEl) { widthBottomEl.value = widthTopEl.value; }
+
+  if (lenTopEl && lenBottomEl) {
+    lenTopEl.addEventListener('input', function(){ if (lenBottomLinked) lenBottomEl.value = lenTopEl.value; });
+    lenBottomEl.addEventListener('input', function(){ lenBottomLinked = (lenBottomEl.value === lenTopEl.value); });
+  }
+  if (widthTopEl && widthBottomEl) {
+    widthTopEl.addEventListener('input', function(){ if (widthBottomLinked) widthBottomEl.value = widthTopEl.value; });
+    widthBottomEl.addEventListener('input', function(){ widthBottomLinked = (widthBottomEl.value === widthTopEl.value); });
+  }
+
+  function updateVoidRatioUI(){ if (vrOtherValEl) vrOtherValEl.disabled = !(vrOtherEl && vrOtherEl.checked); }
+  updateVoidRatioUI();
+  [vrOpenEl, vrStoneEl, vrOtherEl].forEach(function(el){ if (el) el.addEventListener('change', updateVoidRatioUI); });
+  if (depthExcavationEl) depthExcavationEl.addEventListener('input', recomputeHead);
+
+  function getVoidRatio(){
+    if (vrOpenEl && vrOpenEl.checked) return 1;
+    if (vrStoneEl && vrStoneEl.checked) return 0.3;
+    if (vrOtherEl && vrOtherEl.checked) {
+      var v = parseFloat(vrOtherValEl && vrOtherValEl.value);
+      return isNaN(v) ? null : v;
+    }
+    return null;
+  };
+
+  // --- Auto-calc Head of Water & fall targets (all mm) ---
+  function recomputeHead(){
+    if (!depthTestedEl) return;
+    var doeRaw = (depthExcavationEl && depthExcavationEl.value) ? String(depthExcavationEl.value).replace(',', '.') : '';
+    var doe = parseFloat(doeRaw); // mm
+    var first = (points.length > 0) ? Number(points[0].depth) : NaN; // mm
+    var tgt = document.getElementById('fallTargets');
+    if (!isNaN(doe) && !isNaN(first)){
+      var head = doe - first; // mm
+      var rounded = Math.round(head);
+      depthTestedEl.value = String(rounded);
+      if (tgt){
+        var f25 = Math.round(first - 0.25*head);
+        var f75 = Math.round(first - 0.75*head);
+        tgt.textContent = '25% fall: ' + f25 + ' mm · 75% fall: ' + f75 + ' mm';
+      }
+    } else {
+      depthTestedEl.value = '';
+      if (tgt){ tgt.textContent = '25% fall: — mm · 75% fall: — mm'; }
+    }
+  }
+
+  // --- Unit validation (mm) ---
+  function likelyMeters(v){ return v > 0 && v < 50; }
+  function parseNum(el){ if (!el) return NaN; var s = String(el.value||'').replace(',', '.'); var n = parseFloat(s); return isNaN(n) ? NaN : n; }
+  function flag(el, on){ if (!el) return; if (on){ el.classList.add('warn'); el.title = 'Value looks like metres; please enter in millimetres (e.g., 2 m → 2000)'; } else { el.classList.remove('warn'); el.title = ''; } }
+  function validateMmInputs(showToast){
+    var suspects = [];
+    var checks = [
+      [lenTopEl, 'Length at Top'],
+      [lenBottomEl, 'Length at Bottom'],
+      [widthTopEl, 'Width at Top'],
+      [widthBottomEl, 'Width at Bottom'],
+      [depthExcavationEl, 'Depth of Excavation']
+    ];
+    for (var i=0;i<checks.length;i++){
+      var el = checks[i][0], label = checks[i][1];
+      var n = parseNum(el);
+      var isSus = likelyMeters(n);
+      flag(el, isSus);
+      if (isSus) suspects.push(label + ' = ' + (el && el.value));
+    }
+    if (showToast && suspects.length){ toast('These look like metres—enter mm: ' + suspects.join('; ') + '. Typical pit ≈ 2000×600×2000 mm.'); }
+    return suspects.length;
+  }
+
+  [lenTopEl,lenBottomEl,widthTopEl,widthBottomEl,depthExcavationEl].forEach(function(el){ if (el) el.addEventListener('change', function(){ validateMmInputs(false); recomputeHead(); }); });
+  validateMmInputs(false);
+
+  // --- Timer logic ---
+  const updateTimer = () => {
+    const now = Date.now();
+    const runningSec = running ? Math.round((now - startEpoch)/1000) : 0;
+    const totalSec = elapsedSec + runningSec;
+    timerEl.textContent = fmtHMS(totalSec);
+  };
+  const start = () => {
+    if(!requireIds()) return;
+    validateMmInputs(true); // warn but do not block
+    if(running) return;
+    startEpoch = Date.now();
+    running = true;
+    depthInput.disabled = false;
+    recordBtn.disabled = false;
+    pauseBtn.disabled = false;
+    stopBtn.disabled = false;
+    startBtn.disabled = true;
+    exportBtn.disabled = points.length === 0;
+    if(!('webkitSpeechRecognition' in window || 'SpeechRecognition' in window)){
+      micBtn.disabled = true; micBtn.title = 'Speech input not supported in this browser';
+    } else { micBtn.disabled = false; }
+    clearInterval(tickHandle);
+    tickHandle = setInterval(updateTimer, 250);
+    updateTimer();
+    depthInput.focus();
+  };
+  const pause = () => {
+    if(!running) return;
+    const now = Date.now();
+    elapsedSec += Math.round((now - startEpoch)/1000);
+    running = false;
+    startBtn.disabled = false;
+    pauseBtn.disabled = true;
+    clearInterval(tickHandle);
+    updateTimer();
+  };
+  const stop = () => {
+    if(running) pause();
+    startBtn.disabled = false;
+    recordBtn.disabled = true;
+    depthInput.disabled = true;
+    pauseBtn.disabled = true;
+    stopBtn.disabled = true;
+  };
+  const getNowSeconds = () => { if(running){ const now = Date.now(); return elapsedSec + Math.round((now - startEpoch)/1000); } return elapsedSec; };
+
+  // --- Capture logic ---
+  const recordDepth = () => {
+    const raw = (depthInput.value || '').trim();
+    if(raw === ''){ toast('Enter a depth in mm first.'); depthInput.focus(); return; }
+    const depth = Number(raw.replace(',', '.'));
+    if(Number.isNaN(depth) || depth < 0){ toast('Depth must be a non-negative number.'); depthInput.select(); return; }
+    if(!running){ toast('Start the timer before recording.'); return; }
+    const seconds = getNowSeconds();
+    const _now = new Date();
+    const _clock = _now.toLocaleTimeString([], {hour12:false});
+    points.push({ seconds, minutes:Number(toMinutes2dp(seconds)), depth, clock:_clock, iso:_now.toISOString() });
+    renderTable();
+    recomputeHead();
+    depthInput.value = '';
+    depthInput.focus();
+    exportBtn.disabled = points.length === 0;
+    undoBtn.disabled = points.length === 0;
+  };
+
+  const renderTable = () => {
+    tableBody.innerHTML = '';
+    for (var i = points.length - 1; i >= 0; i--) {
+      var r = points[i];
+      const tr = document.createElement('tr');
+      const tdC = document.createElement('td');
+      const tdT = document.createElement('td');
+      const tdD = document.createElement('td');
+      let clockText = '';
+      if (r.clock) { clockText = r.clock; }
+      else if (r.iso) { try { clockText = new Date(r.iso).toLocaleTimeString([], {hour12:false}); } catch(_) {}
+      }
+      tdC.textContent = clockText;
+      tdT.textContent = (r.minutes && r.minutes.toFixed) ? r.minutes.toFixed(2) : Number(r.minutes).toFixed(2);
+      tdD.textContent = r.depth;
+      tr.appendChild(tdC); tr.appendChild(tdT); tr.appendChild(tdD);
+      tableBody.appendChild(tr);
+    }
+    countEl.textContent = points.length;
+  };
+
+  const undoLast = () => {
+    if(points.length === 0) return;
+    points.pop();
+    renderTable();
+    recomputeHead();
+    exportBtn.disabled = points.length === 0;
+    undoBtn.disabled = points.length === 0;
+  };
+
+  const exportCSV = () => {
+    if(points.length === 0){ toast('Nothing to export yet.'); return; }
+
+    function rowsToCsv(rows){
+      return rows.map(function(r){
+        return r.map(function(v){
+          var s = String(v == null ? '' : v);
+          return /[",\n]/.test(s) ? '"' + s.replace(/"/g,'""') + '"' : s;
+        }).join(',');
+      }).join('\n');
+    }
+
+    var meta = [
+      ['Location ID', (locIdEl && locIdEl.value) || ''],
+      ['Test Number', (testNoEl && testNoEl.value) || ''],
+      ['Length at Top (mm)', (lenTopEl && lenTopEl.value) || ''],
+      ['Length at Bottom (mm)', (lenBottomEl && lenBottomEl.value) || ''],
+      ['Width at Top (mm)', (widthTopEl && widthTopEl.value) || ''],
+      ['Width at Bottom (mm)', (widthBottomEl && widthBottomEl.value) || ''],
+      ['Depth of Excavation (mm)', (depthExcavationEl && depthExcavationEl.value) || ''],
+      ['Head of Water (mm)', (depthTestedEl && depthTestedEl.value) || ''],
+      ['Void Ratio', (function(){ var vr = getVoidRatio(); return (vr==null? '' : vr); })()],
+      ['Strata Description', (strataEl && strataEl.value) || ''],
+      ['Pit Details', (pitEl && pitEl.value) || '']
+    ];
+
+    var lines = [];
+    lines.push(rowsToCsv(meta));
+    lines.push('');
+    lines.push('Clock time (local),Time (mins),Depth to water (mm)');
+    for(var i=0;i<points.length;i++){
+      var p = points[i];
+      lines.push(String(p.clock || '') + ',' + String(Number(p.minutes).toFixed(2)) + ',' + String(p.depth));
+    }
+
+    var csv = lines.join('\n');
+    var blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+    var a = document.createElement('a');
+    var now = new Date();
+    var ts = now.toISOString().replace(/[:T]/g,'-').slice(0,19);
+    var fname = `${sanitizeName(locIdEl.value)}_${sanitizeName(testNoEl.value)}_${ts}.csv`;
+    a.href = URL.createObjectURL(blob);
+    a.download = fname;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(()=>URL.revokeObjectURL(a.href), 0);
+  };
+
+  // --- Speech input (simple number grab) ---
+  let recognition = null;
+  if('webkitSpeechRecognition' in window || 'SpeechRecognition' in window){
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    recognition = new SR();
+    recognition.lang = 'en-GB';
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 1;
+
+    recognition.onstart = function(){ micBtn.classList.add('listening'); };
+    recognition.onend   = function(){ micBtn.classList.remove('listening'); };
+    
+    recognition.onerror = function(e){
+      var code = (e && e.error) ? String(e.error) : 'unknown';
+      var msg = '';
+      switch(code){
+        case 'not-allowed':
+        case 'service-not-allowed':
+          msg = 'Speech blocked by browser policy. Even with mic allowed, this can happen in in‑app viewers or non-standard URLs. Open in Chrome (not incognito), in a normal tab, and ensure you\'re online.';
+          break;
+        case 'network':
+          msg = 'Network error. Web Speech needs a data connection.';
+          break;
+        case 'no-speech':
+          msg = 'Heard nothing. Try again closer to the mic.';
+          break;
+        case 'audio-capture':
+          msg = 'Mic not available. Close other apps using the mic.';
+          break;
+        case 'aborted':
+          msg = 'Speech aborted.';
+          break;
+        default:
+          msg = 'Speech error: ' + code;
+      }
+      toast(msg);
+    };
+    
+    recognition.onresult = function(e){
+      var t = '';
+      try { if (e.results && e.results[0] && e.results[0][0] && e.results[0][0].transcript) t = e.results[0][0].transcript; } catch(_) {}
+      const transcript = String(t || '').toLowerCase();
+      const m = transcript.match(/(\d+(?:[\.,]\d+)?)/);
+      if(m){ depthInput.value = m[1].replace(',', '.'); recordDepth(); }
+      else { toast('Didn’t catch a number. Try speaking digits like “three five zero”.'); }
+    };
+  }
+
+  // --- Events ---
+  startBtn.addEventListener('click', start);
+  pauseBtn.addEventListener('click', pause);
+  stopBtn.addEventListener('click', stop);
+  recordBtn.addEventListener('click', recordDepth);
+  undoBtn.addEventListener('click', undoLast);
+  exportBtn.addEventListener('click', exportCSV);
+
+  depthInput.addEventListener('keydown', function(e){ if(e.key === 'Enter'){ e.preventDefault(); recordDepth(); } });
+  micBtn.addEventListener('click', function(){ if(!recognition){ toast('Speech input not supported in this browser.'); return; } if(!running){ toast('Start the timer before speaking a depth.'); return; } recognition.start(); });
+
+  stopBtn.addEventListener('click', function(){ exportBtn.disabled = points.length === 0; });
+
+  [locIdEl, testNoEl].forEach(function(inp){ inp.addEventListener('change', function(){ if((locIdEl.value||'').trim() && (testNoEl.value||'').trim()){ startBtn.title = ''; } else { startBtn.title = 'Enter Location ID and Test Number first'; } }); });
+})();
+
+  // --- Drawer wiring: move inputs into the sliding panel ---
+  (function setupDrawer(){
+    const openBtn = document.getElementById('openDrawerBtn');
+    const closeBtn = document.getElementById('closeDrawerBtn');
+    const drawer = document.getElementById('drawer');
+    const backdrop = document.getElementById('drawerBackdrop');
+    const content = document.getElementById('drawerContent');
+
+    if(!openBtn || !closeBtn || !drawer || !backdrop || !content) return;
+
+    // Grab the existing parameter blocks: the loc/test row and the paramsCard
+    let idRow = null;
+    try { idRow = document.getElementById('locId').closest('.id-row'); } catch(_){}
+    const paramsCard = document.getElementById('paramsCard');
+
+    // Clone-safe move: append the nodes themselves (not clones) into the drawer content
+    const frag = document.createDocumentFragment();
+    if(idRow) frag.appendChild(idRow);
+    if(paramsCard) frag.appendChild(paramsCard);
+    content.appendChild(frag);
+
+    function open(){ document.body.classList.add('drawer-open'); }
+    function close(){ document.body.classList.remove('drawer-open'); }
+    openBtn.addEventListener('click', open);
+    closeBtn.addEventListener('click', close);
+    backdrop.addEventListener('click', close);
+    document.addEventListener('keydown', function(e){ if(e.key === 'Escape'){ close(); } });
+  })();
+</script>
+</body>
+</html>

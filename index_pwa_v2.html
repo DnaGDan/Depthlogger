@@ -1,0 +1,741 @@
+<script type="text/javascript">
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function filledCell(cell) {
+          return cell !== '' && cell != null;
+        }
+        function loadFileData(filename) {
+        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+            try {
+                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                var firstSheetName = workbook.SheetNames[0];
+                var worksheet = workbook.Sheets[firstSheetName];
+
+                // Convert sheet to JSON to filter blank rows
+                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                // Filter out blank rows (rows where all cells are empty, null, or undefined)
+                var filteredData = jsonData.filter(row => row.some(filledCell));
+
+                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
+                var headerRowIndex = filteredData.findIndex((row, index) =>
+                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+                );
+                // Fallback
+                if (headerRowIndex === -1 || headerRowIndex > 25) {
+                  headerRowIndex = 0;
+                }
+
+                // Convert filtered JSON back to CSV
+                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
+                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                return csv;
+            } catch (e) {
+                console.error(e);
+                return "";
+            }
+        }
+        return gk_fileData[filename] || "";
+        }
+        </script><!DOCTYPE html>
+   <html lang="en">
+   <head>
+       <meta charset="UTF-8">
+       <meta name="viewport" content="width=device-width, initial-scale=1.0">
+       <title>Brownfield Solutions Depth-to-Water Logger PWA</title>
+       <link rel="manifest" href="./manifest.json">
+       <link rel="apple-touch-icon" href="./icon-192.png">
+       <meta name="theme-color" content="#4e94ef">
+       <style>
+           body { font-family: Arial, sans-serif; margin: 20px; color: #223642; background: #d8e9f9; }
+           table { width: 100%; border-collapse: collapse; }
+           th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+           th { background-color: #f2f2f2; }
+           input, select, textarea { width: 100%; padding: 8px; margin: 4px 0; box-sizing: border-box; }
+           button { padding: 8px 16px; margin: 4px; cursor: pointer; background: #4e94ef; color: white; border: none; border-radius: 4px; }
+           .section { margin-bottom: 20px; border: 1px solid #ddd; padding: 10px; background: white; }
+           #timer { font-size: 24px; font-weight: bold; }
+           #pointsTable { margin-top: 10px; }
+           #savedTests { margin-top: 20px; }
+           /* Slide-out panel styles */
+           #parameters {
+               position: fixed;
+               top: 0;
+               right: -300px;
+               width: 300px;
+               height: 100%;
+               background: #f9f9f9;
+               border-left: 1px solid #ddd;
+               padding: 20px;
+               transition: right 0.3s ease;
+               z-index: 1000;
+               overflow-y: auto;
+           }
+           #parameters.open { right: 0; }
+           #parametersToggle { cursor: pointer; position: fixed; top: 20px; right: 20px; z-index: 1001; background: #223642; color: #7fc5f3; }
+           #parametersClose { margin-bottom: 10px; }
+           input:disabled { background-color: #f0f0f0; }
+           #logo { max-width: 200px; display: block; margin: 0 auto 20px; }
+           h1 { color: #4e94ef; text-align: center; }
+       </style>
+     <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+
+<style>
+  h1 { font-size: clamp(18px, 2.4vw, 24px); margin-bottom: 8px; }
+  #clock, #clockDisplay, .clock-display { font-size: clamp(24px, 6vw, 48px); font-weight: 700; letter-spacing: 0.02em; }
+  #depthInput, input[name="depthInput"], input#DepthToWater, input[data-role="depth"] { font-size: 1.15rem; padding: 10px 12px; height: 48px; }
+  .btn[disabled], button[disabled] { opacity: .45 !important; cursor: not-allowed !important; filter: grayscale(0.5); }
+  .params-panel { transition: transform .3s ease, opacity .2s ease; will-change: transform, opacity; }
+  .params-closed { transform: translateX(-120%); opacity: 0; pointer-events: none; visibility: hidden; }
+  #micButton.listening, .mic-button.listening { position: relative; box-shadow: 0 0 0 4px rgba(255,0,0,.15); }
+  #micButton.listening::after, .mic-button.listening::after { content: ""; position: absolute; right: -6px; top: -6px; width: 10px; height: 10px; border-radius: 50%; background: #e11; animation: pulse 1s infinite; }
+  @keyframes pulse { 0%{transform:scale(.8); opacity:.6} 50%{transform:scale(1); opacity:1} 100%{transform:scale(.8); opacity:.6} }
+  :root { --bg:#0b1020; --fg:#eaf2ff; --card:#121a33; --muted:#96a4c2; --accent:#4e94ef; }
+  .theme-light { --bg:#ffffff; --fg:#0b1020; --card:#f2f6ff; --muted:#4b5568; --accent:#2b6de8; }
+  body { background: var(--bg); color: var(--fg); }
+  .card { background: var(--card); }
+  .muted { color: var(--muted); }
+  a, .pill { border-color: var(--accent); }
+</style>
+
+</head>
+   <body>
+       <img id="logo" src="./brownfield_logo.png" alt="Brownfield Solutions Logo">
+       <h1>Depth-to-Water Logger</h1>
+<div style="display:flex; gap:8px; align-items:center; margin:4px 0 10px"><label style="display:flex; gap:6px; align-items:center; cursor:pointer"><input type="checkbox" id="themeToggle"><span class="muted">Light theme</span></label></div>
+       <p>CSV header: Clock time (local), Time (mins), Depth to water (mm)</p>
+       <button id="parametersToggle">⚙️ Parameters</button>
+
+       <div class="section" id="parameters" class="params-panel">
+           <button id="parametersClose">Close</button>
+           <h2>Test Parameters (all in millimetres)</h2>
+           <div>
+               <label>Location ID: <input type="text" id="locationId"></label>
+               <label>Test Number: <input type="text" id="testNumber"></label>
+           </div>
+           <div>
+               <label>Length at Top (mm): <input type="number" id="lengthTop"></label>
+               <label>Length at Bottom (mm): <input type="number" id="lengthBottom" placeholder="Mirrors top"></label>
+           </div>
+           <div>
+               <label>Width at Top (mm): <input type="number" id="widthTop"></label>
+               <label>Width at Bottom (mm): <input type="number" id="widthBottom" placeholder="Mirrors top"></label>
+           </div>
+           <div>
+               <label>Depth Tested (Head of Water) (mm): <input type="number" id="depthTested" readonly placeholder="Calculated"></label>
+               <label>Depth of Excavation (mm): <input type="number" id="depthExcavation"></label>
+           </div>
+           <div>
+               <label>Void Ratio:
+                   <select id="voidRatio">
+                       <option value="1">Open (1)</option>
+                       <option value="0.3">Single size stone (0.3)</option>
+                       <option value="">Other</option>
+                   </select>
+                   <input type="number" id="voidRatioOther" placeholder="Custom value" style="display: none;">
+               </label>
+           </div>
+           <div>
+               <label>Strata Description: <textarea id="strataDescription"></textarea></label>
+               <label>Pit Details: <textarea id="pitDetails"></textarea></label>
+           </div>
+           <p>Bottom values mirror Top on entry; once edited, they become independent. Typical pit ≈ 2000×600×2000 mm.</p>
+       </div>
+
+       <div class="section" id="timerSection">
+           <div id="timer">00:00:00</div>
+           <button id="startTimer" disabled>Start</button>
+           <button id="pauseTimer" disabled>Pause</button>
+           <button id="stopTimer" disabled>Stop</button>
+           <button id="clearCurrent">Clear Current Test</button>
+           <p>Timer rounds to the nearest second. Times are exported as decimal minutes (2 dp).</p>
+       </div>
+
+       <div class="section" id="recordSection">
+           <label>Depth to Water (mm): <input type="number" id="depthInput" placeholder="Enter depth"></label>
+           <button id="recordButton">Record</button>
+           <button id="speechButton">🎤</button>
+           <p>25% fall: <span id="fall25">—</span> mm · 75% fall: <span id="fall75">—</span> mm</p>
+           <p>Press Enter inside the field to record instantly.</p>
+       </div>
+
+       <div class="section" id="dataTable">
+           <table id="pointsTable">
+               <thead>
+                   <tr>
+                       <th>Clock time</th>
+                       <th>Time (mins)</th>
+                       <th>Depth to water (mm)</th>
+                   </tr>
+               </thead>
+               <tbody></tbody>
+           </table>
+           <p>Points: <span id="pointsCount">0</span></p>
+           <button id="undoButton">Undo last</button>
+           <button id="exportButton">Export CSV</button>
+       </div>
+
+       <div class="section" id="savedTests">
+           <h2>Saved Tests</h2>
+           <button id="saveCurrent">Save Current Test</button>
+           <ul id="testsList"></ul>
+       </div>
+
+       <p>Tip: file name includes Location ID & Test Number. Speech input works best in Chrome (desktop/mobile).</p>
+
+       <script>
+           // Core variables
+           let timerInterval;
+           let startTime;
+           let pausedTime = 0;
+           let pauseStart;
+           let isPaused = false;
+           let points = [];
+           let currentTestId = null;
+           let lengthBottomIndependent = false;
+           let widthBottomIndependent = false;
+           let testStarted = false;
+
+           // Local Storage Keys
+           const STORAGE_KEY = 'depthLoggerTests';
+           const CURRENT_KEY = 'depthLoggerCurrent';
+
+           // Load saved tests
+           function loadSavedTests() {
+               const tests = JSON.parse(localStorage.getItem(STORAGE_KEY)) || [];
+               const list = document.getElementById('testsList');
+               list.innerHTML = '';
+               tests.forEach(test => {
+                   const li = document.createElement('li');
+                   li.innerHTML = `${test.locationId} - ${test.testNumber} <button onclick="loadTest('${test.id}')">Load</button> <button onclick="deleteTest('${test.id}')">Delete</button>`;
+                   list.appendChild(li);
+               });
+           }
+
+           // Save current test to local storage (auto-save on changes)
+           function autoSaveCurrent() {
+               const current = getCurrentData();
+               localStorage.setItem(CURRENT_KEY, JSON.stringify(current));
+           }
+
+           // Save as a new or update existing test
+           function saveTest() {
+               let tests = JSON.parse(localStorage.getItem(STORAGE_KEY)) || [];
+               const data = getCurrentData();
+               if (!currentTestId) {
+                   currentTestId = Date.now().toString();
+                   data.id = currentTestId;
+                   tests.push(data);
+               } else {
+                   const index = tests.findIndex(t => t.id === currentTestId);
+                   if (index !== -1) {
+                       tests[index] = data;
+                   }
+               }
+               localStorage.setItem(STORAGE_KEY, JSON.stringify(tests));
+               loadSavedTests();
+               alert('Test saved!');
+           }
+
+           // Load a test
+           window.loadTest = function(id) {
+               const tests = JSON.parse(localStorage.getItem(STORAGE_KEY)) || [];
+               const test = tests.find(t => t.id === id);
+               if (test) {
+                   currentTestId = id;
+                   setCurrentData(test);
+                   testStarted = test.testStarted || (test.points && test.points.length > 0);
+                   updateTable();
+                   calculateFalls();
+                   updateDepthTested();
+                   autoSaveCurrent();
+                   // Reset bottom independence when loading a test
+                   lengthBottomIndependent = !!test.lengthBottom;
+                   widthBottomIndependent = !!test.widthBottom;
+                   document.getElementById('lengthBottom').value = test.lengthBottom || test.lengthTop;
+                   document.getElementById('widthBottom').value = test.widthBottom || test.widthTop;
+                   // Load timer to paused state at latest time
+                   loadTimerState();
+                   updateUIState();
+                   checkStartButton();
+               }
+           }
+
+           // Delete a test
+           window.deleteTest = function(id) {
+               let tests = JSON.parse(localStorage.getItem(STORAGE_KEY)) || [];
+               tests = tests.filter(t => t.id !== id);
+               localStorage.setItem(STORAGE_KEY, JSON.stringify(tests));
+               if (currentTestId === id) {
+                   resetForm();
+               }
+               loadSavedTests();
+           }
+
+           // Get current form data
+           function getCurrentData() {
+               return {
+                   id: currentTestId,
+                   locationId: document.getElementById('locationId').value,
+                   testNumber: document.getElementById('testNumber').value,
+                   lengthTop: document.getElementById('lengthTop').value,
+                   lengthBottom: document.getElementById('lengthBottom').value,
+                   widthTop: document.getElementById('widthTop').value,
+                   widthBottom: document.getElementById('widthBottom').value,
+                   depthTested: document.getElementById('depthTested').value,
+                   depthExcavation: document.getElementById('depthExcavation').value,
+                   voidRatio: document.getElementById('voidRatio').value || document.getElementById('voidRatioOther').value,
+                   strataDescription: document.getElementById('strataDescription').value,
+                   pitDetails: document.getElementById('pitDetails').value,
+                   points: points,
+                   testStarted: testStarted
+               };
+           }
+
+           // Set form data
+           function setCurrentData(data) {
+               document.getElementById('locationId').value = data.locationId || '';
+               document.getElementById('testNumber').value = data.testNumber || '';
+               document.getElementById('lengthTop').value = data.lengthTop || '';
+               document.getElementById('lengthBottom').value = data.lengthBottom || data.lengthTop || '';
+               document.getElementById('widthTop').value = data.widthTop || '';
+               document.getElementById('widthBottom').value = data.widthBottom || data.widthTop || '';
+               document.getElementById('depthTested').value = data.depthTested || '';
+               document.getElementById('depthExcavation').value = data.depthExcavation || '';
+               if (data.voidRatio === '1' || data.voidRatio === '0.3') {
+                   document.getElementById('voidRatio').value = data.voidRatio;
+                   document.getElementById('voidRatioOther').style.display = 'none';
+               } else if (data.voidRatio) {
+                   document.getElementById('voidRatio').value = '';
+                   document.getElementById('voidRatioOther').value = data.voidRatio;
+                   document.getElementById('voidRatioOther').style.display = 'block';
+               } else {
+                   document.getElementById('voidRatio').value = '1';
+                   document.getElementById('voidRatioOther').style.display = 'none';
+                   document.getElementById('voidRatioOther').value = '';
+               }
+               document.getElementById('strataDescription').value = data.strataDescription || '';
+               document.getElementById('pitDetails').value = data.pitDetails || '';
+               points = data.points || [];
+           }
+
+           // Reset form
+           function resetForm() {
+               currentTestId = null;
+               points = [];
+               lengthBottomIndependent = false;
+               widthBottomIndependent = false;
+               testStarted = false;
+               setCurrentData({});
+               document.getElementById('lengthBottom').value = '';
+               document.getElementById('widthBottom').value = '';
+               document.getElementById('depthTested').value = '';
+               updateTable();
+               calculateFalls();
+               localStorage.removeItem(CURRENT_KEY);
+               // Reset timer
+               document.getElementById('timer').textContent = '00:00:00';
+               startTime = undefined;
+               pausedTime = 0;
+               pauseStart = undefined;
+               isPaused = false;
+               if (timerInterval) clearInterval(timerInterval);
+               timerInterval = null;
+               updateUIState();
+               checkStartButton();
+           }
+
+           // Update UI state
+           function updateUIState() {
+               document.getElementById('locationId').disabled = testStarted;
+               document.getElementById('testNumber').disabled = testStarted;
+               document.getElementById('pauseTimer').disabled = points.length === 0;
+               document.getElementById('stopTimer').disabled = points.length === 0;
+           }
+
+           // Check Start button state
+           function checkStartButton() {
+               const locationId = document.getElementById('locationId').value.trim();
+               const testNumber = document.getElementById('testNumber').value.trim();
+               const lengthTop = document.getElementById('lengthTop').value.trim();
+               const widthTop = document.getElementById('widthTop').value.trim();
+               const depthExcavation = document.getElementById('depthExcavation').value.trim();
+               const startButton = document.getElementById('startTimer');
+               startButton.disabled = testStarted || !locationId || !testNumber || !lengthTop || !widthTop || !depthExcavation;
+           }
+
+           // Timer functions
+           function updateTimer() {
+               const now = isPaused ? pauseStart : Date.now();
+               const elapsed = now - startTime - pausedTime;
+               const seconds = Math.round(elapsed / 1000);
+               const h = Math.floor(seconds / 3600).toString().padStart(2, '0');
+               const m = Math.floor((seconds % 3600) / 60).toString().padStart(2, '0');
+               const s = (seconds % 60).toString().padStart(2, '0');
+               document.getElementById('timer').textContent = `${h}:${m}:${s}`;
+           }
+
+           document.getElementById('startTimer').addEventListener('click', () => {
+               if (!startTime) {
+                   startTime = Date.now();
+                   pausedTime = 0;
+                   isPaused = false;
+                   testStarted = true;
+                   timerInterval = setInterval(updateTimer, 1000);
+                   updateUIState();
+                   checkStartButton();
+               } else if (isPaused) {
+                   pausedTime += Date.now() - pauseStart;
+                   isPaused = false;
+                   timerInterval = setInterval(updateTimer, 1000);
+               }
+           });
+
+           document.getElementById('pauseTimer').addEventListener('click', () => {
+               if (timerInterval && !isPaused) {
+                   clearInterval(timerInterval);
+                   pauseStart = Date.now();
+                   isPaused = true;
+                   updateTimer();
+               }
+           });
+
+           document.getElementById('stopTimer').addEventListener('click', () => {
+               if (confirm('Confirm end of test? This will stop the timer and auto-export the CSV.')) {
+                   clearInterval(timerInterval);
+                   timerInterval = null;
+                   pausedTime = 0;
+                   isPaused = false;
+                   startTime = undefined;
+                   pauseStart = undefined;
+                   document.getElementById('timer').textContent = '00:00:00';
+                   exportCSV();
+               }
+           });
+
+           // Load timer state to paused at latest time
+           function loadTimerState() {
+               if (points.length > 0) {
+                   const lastTimeMins = parseFloat(points[points.length - 1].timeMins);
+                   const lastElapsedMs = lastTimeMins * 60 * 1000;
+                   startTime = Date.now();
+                   pausedTime = -lastElapsedMs;
+                   pauseStart = Date.now();
+                   isPaused = true;
+                   timerInterval = null;
+                   updateTimer();
+               } else {
+                   document.getElementById('timer').textContent = '00:00:00';
+                   startTime = undefined;
+                   pausedTime = 0;
+                   pauseStart = undefined;
+                   isPaused = false;
+               }
+           }
+
+           // Record point
+           function recordPoint() {
+               const depth = parseFloat(document.getElementById('depthInput').value);
+               if (isNaN(depth)) return;
+               const clockTime = new Date().toLocaleTimeString();
+               const now = isPaused ? pauseStart : Date.now();
+               const elapsed = (now - startTime - pausedTime) / 1000 / 60;
+               const timeMins = elapsed.toFixed(2);
+               points.push({ clockTime, timeMins, depth });
+               if (points.length === 1) {
+                   updateDepthTested();
+               }
+               updateTable();
+               calculateFalls();
+               document.getElementById('depthInput').value = '';
+               autoSaveCurrent();
+               updateUIState();
+           }
+
+           document.getElementById('recordButton').addEventListener('click', recordPoint);
+           document.getElementById('depthInput').addEventListener('keypress', (e) => {
+               if (e.key === 'Enter') recordPoint();
+           });
+
+           // Update table (latest at top)
+           function updateTable() {
+               const tbody = document.getElementById('pointsTable').querySelector('tbody');
+               tbody.innerHTML = '';
+               points.slice().reverse().forEach(point => {
+                   const tr = document.createElement('tr');
+                   tr.innerHTML = `<td>${point.clockTime}</td><td>${point.timeMins}</td><td>${point.depth}</td>`;
+                   tbody.appendChild(tr);
+               });
+               document.getElementById('pointsCount').textContent = points.length;
+           }
+
+           // Calculate 25% and 75% falls
+           function calculateFalls() {
+               if (points.length < 1) {
+                   document.getElementById('fall25').textContent = '—';
+                   document.getElementById('fall75').textContent = '—';
+                   return;
+               }
+               const initialDepth = points[0].depth;
+               const fall25 = initialDepth * 0.25;
+               const fall75 = initialDepth * 0.75;
+               document.getElementById('fall25').textContent = fall25.toFixed(2);
+               document.getElementById('fall75').textContent = fall75.toFixed(2);
+           }
+
+           // Update Depth Tested
+           function updateDepthTested() {
+               if (points.length > 0) {
+                   const exc = parseFloat(document.getElementById('depthExcavation').value) || 0;
+                   const firstDepth = points[0].depth;
+                   document.getElementById('depthTested').value = exc - firstDepth;
+               } else {
+                   document.getElementById('depthTested').value = '';
+               }
+           }
+
+           // Undo last
+           document.getElementById('undoButton').addEventListener('click', () => {
+               if (points.length > 0) {
+                   points.pop();
+                   updateTable();
+                   calculateFalls();
+                   updateDepthTested();
+                   autoSaveCurrent();
+                   updateUIState();
+               }
+           });
+
+           // Export CSV function
+           function exportCSV() {
+               const data = getCurrentData();
+               let csv = 'Test Parameters\n';
+               csv += 'Location ID,' + (data.locationId || '') + '\n';
+               csv += 'Test Number,' + (data.testNumber || '') + '\n';
+               csv += 'Length at Top (mm),' + (data.lengthTop || '') + '\n';
+               csv += 'Length at Bottom (mm),' + (data.lengthBottom || data.lengthTop || '') + '\n';
+               csv += 'Width at Top (mm),' + (data.widthTop || '') + '\n';
+               csv += 'Width at Bottom (mm),' + (data.widthBottom || data.widthTop || '') + '\n';
+               csv += 'Depth Tested (mm),' + (data.depthTested || '') + '\n';
+               csv += 'Depth of Excavation (mm),' + (data.depthExcavation || '') + '\n';
+               csv += 'Void Ratio,' + (data.voidRatio || '') + '\n';
+               csv += 'Strata Description,' + (data.strataDescription || '') + '\n';
+               csv += 'Pit Details,' + (data.pitDetails || '') + '\n';
+               csv += '\nData\n';
+               csv += 'Clock time (local),Time (mins),Depth to water (mm)\n';
+               points.forEach(point => {
+                   csv += `${point.clockTime},${point.timeMins},${point.depth}\n`;
+               });
+               const locationId = data.locationId || 'unknown';
+               const testNumber = data.testNumber || 'unknown';
+               const blob = new Blob([csv], { type: 'text/csv' });
+               const url = URL.createObjectURL(blob);
+               const a = document.createElement('a');
+               a.href = url;
+               a.download = `${locationId}_${testNumber}.csv`;
+               a.click();
+           }
+
+           document.getElementById('exportButton').addEventListener('click', exportCSV);
+
+           // Clear current
+           document.getElementById('clearCurrent').addEventListener('click', () => {
+               if (confirm('Clear current test data?')) {
+                   resetForm();
+               }
+           });
+
+           // Void ratio other
+           document.getElementById('voidRatio').addEventListener('change', (e) => {
+               const other = document.getElementById('voidRatioOther');
+               if (e.target.value === '') {
+                   other.style.display = 'block';
+               } else {
+                   other.style.display = 'none';
+                   other.value = '';
+               }
+               autoSaveCurrent();
+           });
+
+           // Bottom tracking top
+           function trackBottom(idTop, idBottom, independentFlag) {
+               const top = document.getElementById(idTop);
+               const bottom = document.getElementById(idBottom);
+               top.addEventListener('input', () => {
+                   if (!window[independentFlag]) {
+                       bottom.value = top.value;
+                   }
+                   autoSaveCurrent();
+                   checkStartButton();
+               });
+               bottom.addEventListener('input', () => {
+                   window[independentFlag] = true;
+                   autoSaveCurrent();
+               });
+           }
+           trackBottom('lengthTop', 'lengthBottom', 'lengthBottomIndependent');
+           trackBottom('widthTop', 'widthBottom', 'widthBottomIndependent');
+
+           // Slide-out panel
+           document.getElementById('parametersToggle').addEventListener('click', () => {
+               document.getElementById('parameters').classList.add('open');
+           });
+           document.getElementById('parametersClose').addEventListener('click', () => {
+               document.getElementById('parameters').classList.remove('open');
+           });
+
+           // Speech recognition
+           const speechButton = document.getElementById('speechButton');
+           if ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window) {
+               const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+               speechButton.addEventListener('click', () => {
+                   const recognition = new SpeechRecognition();
+                   recognition.onresult = (event) => {
+                       const transcript = event.results[0][0].transcript;
+                       document.getElementById('depthInput').value = parseFloat(transcript);
+                       recordPoint();
+                   };
+                   recognition.start();
+               });
+           } else {
+               speechButton.disabled = true;
+               speechButton.title = 'Speech recognition not supported';
+           }
+
+           // Save current button
+           document.getElementById('saveCurrent').addEventListener('click', saveTest);
+
+           // Load current on init
+           const savedCurrent = JSON.parse(localStorage.getItem(CURRENT_KEY));
+           if (savedCurrent) {
+               setCurrentData(savedCurrent);
+               testStarted = savedCurrent.testStarted || false;
+               updateTable();
+               calculateFalls();
+               updateDepthTested();
+               lengthBottomIndependent = !!savedCurrent.lengthBottom;
+               widthBottomIndependent = !!savedCurrent.widthBottom;
+               document.getElementById('lengthBottom').value = savedCurrent.lengthBottom || savedCurrent.lengthTop;
+               document.getElementById('widthBottom').value = savedCurrent.widthBottom || savedCurrent.widthTop;
+               loadTimerState();
+               updateUIState();
+               checkStartButton();
+           }
+           loadSavedTests();
+           checkStartButton(); // Ensure start button state is checked on initial load
+
+           // Auto-save and check start button on parameter changes
+           const params = document.querySelectorAll('#parameters input, #parameters select, #parameters textarea');
+           params.forEach(el => el.addEventListener('input', () => {
+               autoSaveCurrent();
+               checkStartButton();
+           }));
+
+           // Update depth tested on excavation change
+           document.getElementById('depthExcavation').addEventListener('input', () => {
+               updateDepthTested();
+               autoSaveCurrent();
+               checkStartButton();
+           });
+
+           // PWA Service Worker
+           if ('serviceWorker' in navigator) {
+               const swPath = './sw.js'; // Adjust if in a subdirectory (e.g., '/docs/sw.js')
+               window.addEventListener('load', () => {
+                   navigator.serviceWorker.register(swPath, { scope: './' })
+                       .then(registration => {
+                           console.log('Service Worker registered successfully with scope:', registration.scope);
+                       })
+                       .catch(error => {
+                           console.error('Service Worker registration failed:', error.message, 'Path tried:', swPath);
+                       });
+               });
+           }
+       </script>
+   
+<script>
+(function(){
+  const qs = (s)=>document.querySelector(s);
+  const requiredFields = [
+    '#locationId', '#locId', 'input[name="locationId"]', 'input[name="locId"]',
+    '#testNo', 'input[name="testNo"]',
+    '#lenTop', '#lengthTop', '#widthTop', '#lenBottom', '#lengthBottom', '#widthBottom'
+  ];
+  const startBtn = qs('#startPauseBtn') || qs('#startBtn');
+  if (startBtn && !startBtn.id) startBtn.id = 'startPauseBtn';
+  const paramPanels = document.querySelectorAll('.params-panel');
+
+  function paramsComplete(){
+    for (const sel of requiredFields){
+      const el = document.querySelector(sel);
+      if (el && !String(el.value||'').trim()) return false;
+    }
+    return true;
+  }
+  function updateStartDisabled(){
+    if (!startBtn) return;
+    startBtn.disabled = !paramsComplete();
+  }
+  document.addEventListener('input', (e)=>{
+    if (e.target && e.target.matches('input, textarea, select')) updateStartDisabled();
+  });
+  window.addEventListener('load', updateStartDisabled);
+
+  let running = false;
+  function startTimer(){
+    if (typeof window.handleStart === 'function') { window.handleStart(); }
+    running = true; startBtn.textContent = 'Pause';
+  }
+  function pauseTimer(){
+    if (typeof window.handlePause === 'function') { window.handlePause(); }
+    running = false; startBtn.textContent = 'Start';
+  }
+  if (startBtn){
+    startBtn.addEventListener('click', ()=>{
+      if (startBtn.disabled) return;
+      if (!running) startTimer(); else pauseTimer();
+    });
+    startBtn.textContent = 'Start';
+  }
+
+  ['#closeParams','#btnCloseParams','.btnCloseParams'].forEach(sel=>{
+    const el = qs(sel); if (el) el.addEventListener('click', ()=>{
+      paramPanels.forEach(p=>p.classList.add('params-closed'));
+    });
+  });
+  ['#openParams','#btnOpenParams','.btnOpenParams'].forEach(sel=>{
+    const el = qs(sel); if (el) el.addEventListener('click', ()=>{
+      paramPanels.forEach(p=>p.classList.remove('params-closed'));
+    });
+  });
+
+  const micBtn = qs('#micButton') || qs('#mic') || qs('[data-role="mic"]');
+  if (window.recognition){
+    const origStart = window.recognition.onstart;
+    const origEnd = window.recognition.onend;
+    window.recognition.onstart = function(){ if (origStart) origStart.apply(this, arguments); if (micBtn) micBtn.classList.add('listening'); };
+    window.recognition.onend = function(){ if (origEnd) origEnd.apply(this, arguments); if (micBtn) micBtn.classList.remove('listening'); };
+  }
+
+  const themeToggle = qs('#themeToggle');
+  const LSKEY = 'dtw.theme';
+  function applyTheme(mode){
+    if (mode === 'light'){ document.body.classList.add('theme-light'); }
+    else { document.body.classList.remove('theme-light'); }
+  }
+  const saved = localStorage.getItem(LSKEY);
+  applyTheme(saved === 'light' ? 'light' : 'dark');
+  if (themeToggle){
+    themeToggle.checked = (saved === 'light');
+    themeToggle.addEventListener('change', ()=>{
+      const mode = themeToggle.checked ? 'light' : 'dark';
+      localStorage.setItem(LSKEY, mode);
+      applyTheme(mode);
+    });
+  }
+})();
+</script>
+
+</body>
+   </html>

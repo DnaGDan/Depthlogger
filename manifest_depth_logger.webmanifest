@@ -3,7 +3,7 @@
   "short_name": "Water Logger",
   "description": "Field tool for logging depth-to-water with offline storage and CSV export.",
   "id": "/depth-logger",
-  "start_url": "./depth_to_water_logger_PWA_IndexedDB_v1.1.0.html",
+  "start_url": "./depth_to_water_logger_PWA_IndexedDB_v1.7.0.html",
   "display": "standalone",
   "background_color": "#0b1020",
   "theme_color": "#0b1020",

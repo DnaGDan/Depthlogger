@@ -3,7 +3,7 @@
   "short_name": "Water Logger",
   "description": "Record and export soakaway depth-to-water tests. Works offline.",
   "id": "./",
-  "start_url": "./index_pwa_v2.html",
+  "start_url": "./index_pwa_v3.html",
   "scope": "./",
   "display": "standalone",
   "background_color": "#d8e9f9",

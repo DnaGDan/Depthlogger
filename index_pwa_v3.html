@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Brownfield Solutions Depth-to-Water Logger PWA - v3.1 - High Contrast</title>
+  <title>Brownfield Solutions Depth-to-Water Logger PWA - v3.2 - High Contrast</title>
   <link rel="manifest" href="./manifest.json" />
   <link rel="apple-touch-icon" href="./icon-192.png" />
   <meta name="theme-color" content="#0b3ea2" />
@@ -442,7 +442,7 @@
  
   <!-- App base: version + install status (moved from header) -->
   <div style="text-align:center; margin-top:8px;">
-    <span class="version-badge" aria-hidden="true" title="App version">v3.1</span>
+    <span class="version-badge" aria-hidden="true" title="App version">v3.2</span>
     <span id="installStatus" class="version-badge" aria-hidden="true" title="Install status">Not installed</span>
   </div>
 
@@ -1284,21 +1284,21 @@
       return fixed.replace(/\.00$/, '').replace(/(\.\d)0$/, '$1');
     }
 
-    // Update Depth Tested (shows current tested depth)
+    // Update Depth Tested (head of water from the initial depth-to-water reading)
     function updateDepthTested() {
       const exc = parseFloat(document.getElementById('depthExcavation').value);
       const calcEl = document.getElementById('depthTestedCalc');
 
       if (points.length > 0 && Number.isFinite(exc)) {
-        // Current depth is the latest reading
-        const currentDepth = Number(points[points.length - 1].depth);
-        if (Number.isFinite(currentDepth)) {
-          const depthTested = exc - currentDepth;
+        // Depth tested is based on the initial reading only; later readings show progress.
+        const initialDepth = Number(points[0].depth);
+        if (Number.isFinite(initialDepth)) {
+          const depthTested = exc - initialDepth;
           const excLabel = formatDepthValue(exc);
-          const currentLabel = formatDepthValue(currentDepth);
+          const initialLabel = formatDepthValue(initialDepth);
           const testedLabel = formatDepthValue(depthTested);
           document.getElementById('depthTested').value = testedLabel;
-          if (calcEl) calcEl.textContent = `${excLabel}-${currentLabel} = ${testedLabel}`;
+          if (calcEl) calcEl.textContent = `${excLabel}-${initialLabel} = ${testedLabel}`;
         } else {
           document.getElementById('depthTested').value = '';
           if (calcEl) calcEl.textContent = '-';
@@ -1563,7 +1563,7 @@
 
       // PWA Service Worker
       if ('serviceWorker' in navigator) {
-        const swPath = './sw.js?v=3.1';
+        const swPath = './sw.js?v=3.2';
         window.addEventListener('load', () => {
           navigator.serviceWorker.register(swPath, { scope: './' })
             .then(registration => { console.log('Service Worker registered with scope:', registration.scope); })
@@ -1636,7 +1636,23 @@
         checkStartButton();
         passed += 1;
 
-        // Test 5: Saved tests label formatting (does not persist)
+        // Test 5: Depth tested remains anchored to the initial reading
+        const prevPoints = points;
+        const prevDepthExcavation = document.getElementById('depthExcavation').value;
+        const prevDepthTested = document.getElementById('depthTested').value;
+        const prevDepthCalc = document.getElementById('depthTestedCalc').textContent;
+        points = [{ depth: 500 }, { depth: 750 }];
+        document.getElementById('depthExcavation').value = '2000';
+        updateDepthTested();
+        console.assert(document.getElementById('depthTested').value === '1500', 'Depth tested should use initial DTW reading only');
+        points = prevPoints;
+        document.getElementById('depthExcavation').value = prevDepthExcavation;
+        document.getElementById('depthTested').value = prevDepthTested;
+        document.getElementById('depthTestedCalc').textContent = prevDepthCalc;
+        updateDepthTested();
+        passed += 1;
+
+        // Test 6: Saved tests label formatting (does not persist)
         const prevStore = localStorage.getItem(STORAGE_KEY);
         const fake = [{ id: '1730000000000', locationId: 'ID-99', testNumber: 'Test Z', savedAt: new Date('2025-01-01T12:00:00Z').toISOString() }];
         localStorage.setItem(STORAGE_KEY, JSON.stringify(fake));

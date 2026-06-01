@@ -1,4 +1,4 @@
-const VERSION='pwa-v3.1';
+const VERSION='pwa-v3.2';
 const CACHE='depthlogger-'+VERSION;
 // update to new html name
 const ASSETS=['./','./index_pwa_v3.html','./manifest.json','./icon-192.png','./icon-512.png','./brownfield_logo.png'];

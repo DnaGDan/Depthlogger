@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Brownfield Solutions Depth-to-Water Logger PWA - v3.2 - High Contrast</title>
+  <title>Brownfield Solutions Depth-to-Water Logger PWA - v3.3 - High Contrast</title>
   <link rel="manifest" href="./manifest.json" />
   <link rel="apple-touch-icon" href="./icon-192.png" />
   <meta name="theme-color" content="#0b3ea2" />
@@ -442,8 +442,9 @@
  
   <!-- App base: version + install status (moved from header) -->
   <div style="text-align:center; margin-top:8px;">
-    <span class="version-badge" aria-hidden="true" title="App version">v3.2</span>
+    <span id="appVersionBadge" class="version-badge" aria-hidden="true" title="App version">v3.3</span>
     <span id="installStatus" class="version-badge" aria-hidden="true" title="Install status">Not installed</span>
+    <button id="appUpdateButton" class="version-badge update-badge" type="button" hidden>Update ready - reload</button>
   </div>
 
   <p class="hint">File name includes Location ID &amp; Test Number. Speech input works best in Chrome (desktop/mobile).</p>
@@ -521,6 +522,29 @@
 
   <script>
     'use strict';
+
+    const APP_VERSION = 'v3.3';
+    const SERVICE_WORKER_VERSION = APP_VERSION.replace(/^v/, '');
+
+    function showAppUpdateReady() {
+      const updateButton = document.getElementById('appUpdateButton');
+      if (!updateButton) return;
+      updateButton.hidden = false;
+      updateButton.textContent = `Update ready - reload to ${APP_VERSION}`;
+    }
+
+    function initVersionUI() {
+      const versionBadge = document.getElementById('appVersionBadge');
+      const updateButton = document.getElementById('appUpdateButton');
+      if (versionBadge) versionBadge.textContent = APP_VERSION;
+      if (updateButton) {
+        updateButton.addEventListener('click', () => {
+          updateButton.disabled = true;
+          updateButton.textContent = 'Reloading...';
+          window.location.reload();
+        });
+      }
+    }
 
     // Session management for multiple concurrent tests (tabs)
     const sessions = {};      // id -> session object
@@ -1563,10 +1587,41 @@
 
       // PWA Service Worker
       if ('serviceWorker' in navigator) {
-        const swPath = './sw.js?v=3.2';
+        const swPath = `./sw.js?v=${SERVICE_WORKER_VERSION}`;
         window.addEventListener('load', () => {
+          const hadController = Boolean(navigator.serviceWorker.controller);
+          let updateShown = false;
+          const showUpdateOnce = () => {
+            if (!hadController || updateShown) return;
+            updateShown = true;
+            showAppUpdateReady();
+          };
+
+          navigator.serviceWorker.addEventListener('controllerchange', showUpdateOnce);
           navigator.serviceWorker.register(swPath, { scope: './' })
-            .then(registration => { console.log('Service Worker registered with scope:', registration.scope); })
+            .then(registration => {
+              console.log('Service Worker registered with scope:', registration.scope);
+
+              registration.addEventListener('updatefound', () => {
+                const worker = registration.installing;
+                if (!worker) return;
+                worker.addEventListener('statechange', () => {
+                  if (worker.state === 'installed' && navigator.serviceWorker.controller) {
+                    showUpdateOnce();
+                  }
+                });
+              });
+
+              registration.update().catch(error => {
+                console.warn('Service Worker update check failed:', error.message);
+              });
+
+              document.addEventListener('visibilitychange', () => {
+                if (document.visibilityState === 'visible') {
+                  registration.update().catch(() => {});
+                }
+              });
+            })
             .catch(error => { console.error('Service Worker registration failed:', error.message, 'Path tried:', swPath); });
         });
       }
@@ -1577,6 +1632,7 @@
         const isStandalone = (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || window.navigator.standalone;
         installStatusEl.textContent = isStandalone ? 'Installed ✅' : 'Not installed';
       }
+      initVersionUI();
     })();
 
     // Ensure tabs UI initial render (in case sessions were created during init)
@@ -1708,6 +1764,17 @@
       padding: 2px 6px;
       font-size: 0.75rem;
     }
+    button.version-badge{
+      appearance:none;
+      box-shadow:none;
+      cursor:pointer;
+      color:var(--btn-fg);
+      background:var(--btn-bg);
+      vertical-align:baseline;
+    }
+    button.version-badge:hover{ background:var(--btn-bg-hover); }
+    button.version-badge:disabled{ cursor:wait; }
+    .update-badge[hidden]{ display:none; }
   </style>
 </body>
 </html>

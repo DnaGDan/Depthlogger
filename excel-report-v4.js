@@ -375,7 +375,7 @@
     const points = values
       .map((value, index) => ({ value: Number(value), index }))
       .filter(point => Number.isFinite(point.value));
-    return `<c:numCache><c:formatCode>${xmlEscape(formatCode)}</c:formatCode><c:ptCount val="${points.length}"/>${points.map(point => `<c:pt idx="${point.index}"><c:v>${point.value}</c:v></c:pt>`).join('')}</c:numCache>`;
+    return `<c:numCache><c:formatCode>${xmlEscape(formatCode)}</c:formatCode><c:ptCount val="${values.length}"/>${points.map(point => `<c:pt idx="${point.index}"><c:v>${point.value}</c:v></c:pt>`).join('')}</c:numCache>`;
   }
 
   function referencedSeries(index, name, xFormula, xValues, yFormula, yValues, color, options = {}) {
@@ -388,7 +388,7 @@
     const arrowheads = options.arrows ? '<a:headEnd type="triangle" w="sm" len="sm"/><a:tailEnd type="triangle" w="sm" len="sm"/>' : '';
     const line = options.markerOnly
       ? '<a:ln><a:noFill/></a:ln>'
-      : `<a:ln w="${options.width || 25400}"><a:solidFill><a:srgbClr val="${color}"/></a:solidFill>${dash}${arrowheads}</a:ln>`;
+      : `<a:ln w="${options.width || 25400}"><a:solidFill><a:srgbClr val="${color}">${options.alpha ? `<a:alpha val="${options.alpha}"/>` : ''}</a:srgbClr></a:solidFill>${dash}${arrowheads}</a:ln>`;
     return `<c:ser><c:idx val="${index}"/><c:order val="${index}"/><c:tx><c:v>${xmlEscape(name)}</c:v></c:tx>${marker}<c:spPr>${line}</c:spPr><c:xVal><c:numRef><c:f>${xmlEscape(xFormula)}</c:f>${numberCache(xValues, '0.00')}</c:numRef></c:xVal><c:yVal><c:numRef><c:f>${xmlEscape(yFormula)}</c:f>${numberCache(yValues, '0.00')}</c:numRef></c:yVal><c:smooth val="0"/></c:ser>`;
   }
 
@@ -423,7 +423,7 @@
   }
 
   function drainageChartXml(artifact, chartNumber) {
-    const { name, points, results, firstDataRow, lastDataRow } = artifact;
+    const { name, points, results, firstDataRow, lastDataRow, drainageBand } = artifact;
     const times = points.map(point => point.time);
     const heads = points.map(point => results.excavation - point.depth);
     const minTime = times.length ? Math.min(...times) : 0;
@@ -431,11 +431,12 @@
     const xAxisId = 70000000 + chartNumber * 10 + 1;
     const yAxisId = xAxisId + 1;
     const series = [
-      referencedSeries(0, 'Head of water', chartFormula(name, `$C$${firstDataRow}:$C$${lastDataRow}`), times, chartFormula(name, `$E$${firstDataRow}:$E$${lastDataRow}`), heads, '00A651', { marker: true, width: 28575 }),
-      referencedSeries(1, '75% effective depth', chartFormula(name, '$S$13:$S$14'), [minTime, maxTime], chartFormula(name, '$T$13:$T$14'), [results.level75, results.level75], 'C0504D', { width: 19050 }),
-      referencedSeries(2, '25% effective depth', chartFormula(name, '$S$13:$S$14'), [minTime, maxTime], chartFormula(name, '$U$13:$U$14'), [results.level25, results.level25], '70AD47', { width: 19050 }),
+      referencedSeries(0, '25% to 75% effective depth band', chartFormula(name, `$V$${drainageBand.startRow}:$V$${drainageBand.endRow}`), drainageBand.xValues, chartFormula(name, `$W$${drainageBand.startRow}:$W$${drainageBand.endRow}`), drainageBand.yValues, 'FFF59D', { width: 38100, alpha: 30000 }),
+      referencedSeries(1, 'Head of water', chartFormula(name, `$C$${firstDataRow}:$C$${lastDataRow}`), times, chartFormula(name, `$E$${firstDataRow}:$E$${lastDataRow}`), heads, '00A651', { marker: true, width: 28575 }),
+      referencedSeries(2, '75% effective depth', chartFormula(name, '$S$13:$S$14'), [minTime, maxTime], chartFormula(name, '$T$13:$T$14'), [results.level75, results.level75], 'C0504D', { width: 19050 }),
+      referencedSeries(3, '25% effective depth', chartFormula(name, '$S$13:$S$14'), [minTime, maxTime], chartFormula(name, '$U$13:$U$14'), [results.level25, results.level25], '70AD47', { width: 19050 }),
     ].join('');
-    return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><c:date1904 val="0"/><c:lang val="en-GB"/><c:roundedCorners val="0"/><c:chart>${chartTitleXml('Head of water against time')}<c:plotArea><c:layout/><c:scatterChart><c:scatterStyle val="lineMarker"/><c:varyColors val="0"/>${series}<c:dLbls><c:showLegendKey val="0"/><c:showVal val="0"/><c:showCatName val="0"/><c:showSerName val="0"/><c:showPercent val="0"/><c:showBubbleSize val="0"/></c:dLbls><c:axId val="${xAxisId}"/><c:axId val="${yAxisId}"/></c:scatterChart><c:valAx><c:axId val="${xAxisId}"/><c:scaling><c:orientation val="minMax"/><c:min val="0"/></c:scaling><c:delete val="0"/><c:axPos val="b"/>${axisTitleXml('Time (minutes)')}<c:numFmt formatCode="0.0" sourceLinked="0"/><c:majorTickMark val="out"/><c:minorTickMark val="none"/><c:tickLblPos val="nextTo"/><c:spPr><a:ln><a:solidFill><a:srgbClr val="234A5A"/></a:solidFill></a:ln></c:spPr><c:crossAx val="${yAxisId}"/><c:crosses val="autoZero"/><c:crossBetween val="midCat"/></c:valAx><c:valAx><c:axId val="${yAxisId}"/><c:scaling><c:orientation val="minMax"/><c:min val="0"/></c:scaling><c:delete val="0"/><c:axPos val="l"/>${axisTitleXml('Head of water (mm)')}<c:majorGridlines><c:spPr><a:ln w="9525"><a:solidFill><a:srgbClr val="DDEBF7"/></a:solidFill></a:ln></c:spPr></c:majorGridlines><c:numFmt formatCode="0" sourceLinked="0"/><c:majorTickMark val="out"/><c:minorTickMark val="none"/><c:tickLblPos val="nextTo"/><c:spPr><a:ln><a:solidFill><a:srgbClr val="234A5A"/></a:solidFill></a:ln></c:spPr><c:crossAx val="${xAxisId}"/><c:crosses val="autoZero"/><c:crossBetween val="midCat"/></c:valAx></c:plotArea><c:legend><c:legendPos val="b"/><c:layout/><c:overlay val="0"/></c:legend><c:plotVisOnly val="1"/><c:dispBlanksAs val="gap"/><c:showDLblsOverMax val="0"/></c:chart><c:spPr><a:solidFill><a:srgbClr val="FFFFFF"/></a:solidFill><a:ln><a:noFill/></a:ln></c:spPr><c:printSettings><c:headerFooter/><c:pageMargins b="0.75" l="0.7" r="0.7" t="0.75" header="0.3" footer="0.3"/><c:pageSetup/></c:printSettings></c:chartSpace>`;
+    return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><c:date1904 val="0"/><c:lang val="en-GB"/><c:roundedCorners val="0"/><c:chart>${chartTitleXml('Head of water against time')}<c:plotArea><c:layout/><c:scatterChart><c:scatterStyle val="lineMarker"/><c:varyColors val="0"/>${series}<c:dLbls><c:showLegendKey val="0"/><c:showVal val="0"/><c:showCatName val="0"/><c:showSerName val="0"/><c:showPercent val="0"/><c:showBubbleSize val="0"/></c:dLbls><c:axId val="${xAxisId}"/><c:axId val="${yAxisId}"/></c:scatterChart><c:valAx><c:axId val="${xAxisId}"/><c:scaling><c:orientation val="minMax"/><c:min val="0"/></c:scaling><c:delete val="0"/><c:axPos val="b"/>${axisTitleXml('Time (minutes)')}<c:numFmt formatCode="0.0" sourceLinked="0"/><c:majorTickMark val="out"/><c:minorTickMark val="none"/><c:tickLblPos val="nextTo"/><c:spPr><a:ln><a:solidFill><a:srgbClr val="234A5A"/></a:solidFill></a:ln></c:spPr><c:crossAx val="${yAxisId}"/><c:crosses val="autoZero"/><c:crossBetween val="midCat"/></c:valAx><c:valAx><c:axId val="${yAxisId}"/><c:scaling><c:orientation val="minMax"/><c:min val="0"/></c:scaling><c:delete val="0"/><c:axPos val="l"/>${axisTitleXml('Head of water (mm)')}<c:majorGridlines><c:spPr><a:ln w="9525"><a:solidFill><a:srgbClr val="DDEBF7"/></a:solidFill></a:ln></c:spPr></c:majorGridlines><c:numFmt formatCode="0" sourceLinked="0"/><c:majorTickMark val="out"/><c:minorTickMark val="none"/><c:tickLblPos val="nextTo"/><c:spPr><a:ln><a:solidFill><a:srgbClr val="234A5A"/></a:solidFill></a:ln></c:spPr><c:crossAx val="${xAxisId}"/><c:crosses val="autoZero"/><c:crossBetween val="midCat"/></c:valAx></c:plotArea><c:legend><c:legendPos val="b"/><c:legendEntry><c:idx val="0"/><c:delete val="1"/></c:legendEntry><c:layout/><c:overlay val="0"/></c:legend><c:plotVisOnly val="0"/><c:dispBlanksAs val="gap"/><c:showDLblsOverMax val="0"/></c:chart><c:spPr><a:solidFill><a:srgbClr val="FFFFFF"/></a:solidFill><a:ln><a:noFill/></a:ln></c:spPr><c:printSettings><c:headerFooter/><c:pageMargins b="0.75" l="0.7" r="0.7" t="0.75" header="0.3" footer="0.3"/><c:pageSetup/></c:printSettings></c:chartSpace>`;
   }
 
   function calculatePitGeometry(pitDimensions = {}) {
@@ -628,17 +629,37 @@
     const dark = '1F2937';
     const blue = '7EC3E3';
     const waterSurface = '1268E8';
+    const blendHex = (from, to, ratio) => [0, 2, 4].map(offset => {
+      const start = parseInt(from.slice(offset, offset + 2), 16);
+      const end = parseInt(to.slice(offset, offset + 2), 16);
+      return Math.round(start + (end - start) * ratio).toString(16).padStart(2, '0');
+    }).join('').toUpperCase();
     for (let band = 0; band < 32; band += 1) {
       const ratio = (band + 0.5) / 32;
-      addSeries({ type: 'line', name: `Water volume front ${band + 1}`, color: '42C5E8', options: { width: 19050 } }, [between('bottomFrontLeft', 'waterFrontLeft', ratio), between('bottomFrontRight', 'waterFrontRight', ratio)]);
+      addSeries({
+        type: 'line',
+        name: `Water volume front ${band + 1}`,
+        color: blendHex('159FC4', '8ADCEB', ratio),
+        options: { width: 28575, alpha: Math.round(52000 - ratio * 25000) },
+      }, [between('bottomFrontLeft', 'waterFrontLeft', ratio), between('bottomFrontRight', 'waterFrontRight', ratio)]);
     }
     for (let band = 0; band < 32; band += 1) {
       const ratio = (band + 0.5) / 32;
-      addSeries({ type: 'line', name: `Water volume side ${band + 1}`, color: '2DB3D8', options: { width: 19050 } }, [between('bottomFrontRight', 'waterFrontRight', ratio), between('bottomBackRight', 'waterBackRight', ratio)]);
+      addSeries({
+        type: 'line',
+        name: `Water volume side ${band + 1}`,
+        color: blendHex('126E8D', '64B6CA', ratio),
+        options: { width: 28575, alpha: Math.round(60000 - ratio * 28000) },
+      }, [between('bottomFrontRight', 'waterFrontRight', ratio), between('bottomBackRight', 'waterBackRight', ratio)]);
     }
     for (let band = 0; band < 16; band += 1) {
       const ratio = (band + 0.5) / 16;
-      addSeries({ type: 'line', name: `Water volume surface ${band + 1}`, color: '76D8EF', options: { width: 19050 } }, [between('waterFrontLeft', 'waterBackLeft', ratio), between('waterFrontRight', 'waterBackRight', ratio)]);
+      addSeries({
+        type: 'line',
+        name: `Water volume surface ${band + 1}`,
+        color: blendHex('A9E6F1', '6BC9DE', ratio),
+        options: { width: 28575, alpha: Math.round(26000 + ratio * 12000) },
+      }, [between('waterFrontLeft', 'waterBackLeft', ratio), between('waterFrontRight', 'waterBackRight', ratio)]);
     }
     const dryStonePoints = [[], [], []];
     const wetStonePoints = [[], [], []];
@@ -647,33 +668,35 @@
       const raw = Math.sin((row + 1) * 12.9898 + (column + 1) * 78.233 + seed * 37.719) * 43758.5453;
       return raw - Math.floor(raw);
     };
-    const stoneLevels = 31;
+    const stoneLevels = 41;
+    const frontStonePositions = 41;
+    const sideStonePositions = 15;
     const verticalStep = 0.97 / (stoneLevels - 1);
     for (let levelIndex = 0; levelIndex < stoneLevels; levelIndex += 1) {
       const baseVerticalRatio = 0.015 + levelIndex * verticalStep;
-      const frontStep = 0.94 / 30;
-      for (let positionIndex = 0; positionIndex < 31; positionIndex += 1) {
+      const frontStep = 0.94 / (frontStonePositions - 1);
+      for (let positionIndex = 0; positionIndex < frontStonePositions; positionIndex += 1) {
         const verticalRatio = clampRatio(baseVerticalRatio + (gravelNoise(levelIndex, positionIndex, 1) - 0.5) * verticalStep * 0.82);
         const frontLeft = between('bottomFrontLeft', 'topFrontLeft', verticalRatio);
         const frontRight = between('bottomFrontRight', 'topFrontRight', verticalRatio);
         const basePosition = 0.03 + positionIndex * frontStep;
         const rowOffset = (levelIndex % 2 ? 0.16 : -0.16) * frontStep;
         const randomOffset = (gravelNoise(levelIndex, positionIndex, 2) - 0.5) * frontStep * 0.72;
-        const position = positionIndex === 0 ? 0.03 : positionIndex === 30 ? 0.97 : Math.max(0.03, Math.min(0.97, basePosition + rowOffset + randomOffset));
+        const position = positionIndex === 0 ? 0.03 : positionIndex === frontStonePositions - 1 ? 0.97 : Math.max(0.03, Math.min(0.97, basePosition + rowOffset + randomOffset));
         const point = mixSpecs(frontLeft, frontRight, position);
         const shade = Math.min(2, Math.floor(gravelNoise(levelIndex, positionIndex, 3) * 3));
         dryStonePoints[shade].push(conditionalStoneSpec(point, verticalRatio, false));
         wetStonePoints[shade].push(conditionalStoneSpec(point, verticalRatio, true));
       }
-      const sideStep = 0.9 / 10;
-      for (let positionIndex = 0; positionIndex < 11; positionIndex += 1) {
+      const sideStep = 0.9 / (sideStonePositions - 1);
+      for (let positionIndex = 0; positionIndex < sideStonePositions; positionIndex += 1) {
         const verticalRatio = clampRatio(baseVerticalRatio + (gravelNoise(levelIndex, positionIndex, 4) - 0.5) * verticalStep * 0.82);
         const sideFront = between('bottomFrontRight', 'topFrontRight', verticalRatio);
         const sideBack = between('bottomBackRight', 'topBackRight', verticalRatio);
         const basePosition = 0.05 + positionIndex * sideStep;
         const rowOffset = (levelIndex % 2 ? 0.13 : -0.13) * sideStep;
         const randomOffset = (gravelNoise(levelIndex, positionIndex, 5) - 0.5) * sideStep * 0.62;
-        const position = positionIndex === 0 ? 0.05 : positionIndex === 10 ? 0.95 : Math.max(0.05, Math.min(0.95, basePosition + rowOffset + randomOffset));
+        const position = positionIndex === 0 ? 0.05 : positionIndex === sideStonePositions - 1 ? 0.95 : Math.max(0.05, Math.min(0.95, basePosition + rowOffset + randomOffset));
         const point = mixSpecs(sideFront, sideBack, position);
         const shade = Math.min(2, Math.floor(gravelNoise(levelIndex, positionIndex, 6) * 3));
         dryStonePoints[shade].push(conditionalStoneSpec(point, verticalRatio, false));
@@ -698,19 +721,20 @@
         yFormula: `=IF(AND(ABS($B$10-0.3)<0.001,$AC$83>0,${waterTest}),${stripFormula(spec.yFormula)},NA())`,
       };
     };
-    const stoneSurfaceBands = 13;
+    const stoneSurfaceBands = 17;
+    const stoneSurfacePositions = 41;
     const surfaceDepthStep = 0.9 / (stoneSurfaceBands - 1);
     for (let depthIndex = 0; depthIndex < stoneSurfaceBands; depthIndex += 1) {
       const baseDepthRatio = 0.05 + depthIndex * surfaceDepthStep;
-      const surfaceStep = 0.94 / 30;
-      for (let positionIndex = 0; positionIndex < 31; positionIndex += 1) {
+      const surfaceStep = 0.94 / (stoneSurfacePositions - 1);
+      for (let positionIndex = 0; positionIndex < stoneSurfacePositions; positionIndex += 1) {
         const depthRatio = Math.max(0.05, Math.min(0.95, baseDepthRatio + (gravelNoise(depthIndex, positionIndex, 7) - 0.5) * surfaceDepthStep * 0.72));
         const left = mixSpecs(surfaceFrontLeft, surfaceBackLeft, depthRatio);
         const right = mixSpecs(surfaceFrontRight, surfaceBackRight, depthRatio);
         const basePosition = 0.03 + positionIndex * surfaceStep;
         const bandOffset = (depthIndex % 2 ? 0.16 : -0.16) * surfaceStep;
         const randomOffset = (gravelNoise(depthIndex, positionIndex, 8) - 0.5) * surfaceStep * 0.72;
-        const position = positionIndex === 0 ? 0.03 : positionIndex === 30 ? 0.97 : Math.max(0.03, Math.min(0.97, basePosition + bandOffset + randomOffset));
+        const position = positionIndex === 0 ? 0.03 : positionIndex === stoneSurfacePositions - 1 ? 0.97 : Math.max(0.03, Math.min(0.97, basePosition + bandOffset + randomOffset));
         const point = mixSpecs(left, right, position);
         const shade = Math.min(2, Math.floor(gravelNoise(depthIndex, positionIndex, 9) * 3));
         dryStonePoints[shade].push(conditionalStoneSurfaceSpec(point, false));
@@ -1256,6 +1280,24 @@
     ['S13', 'S14', 'T13', 'T14', 'U13', 'U14'].forEach(address => {
       applyCellStyle(worksheet.getCell(address), { fill: BRAND.paleBlue, numFmt: '0.00', alignment: { horizontal: 'right', vertical: 'middle' } });
     });
+    const drainageBand = { startRow: 10000, endRow: 10000, xValues: [], yValues: [] };
+    const drainageBandStripes = 128;
+    let drainageBandRow = drainageBand.startRow;
+    for (let stripe = 0; stripe < drainageBandStripes; stripe += 1) {
+      const ratio = stripe / (drainageBandStripes - 1);
+      const xValue = chartMinTime + (chartMaxTime - chartMinTime) * ratio;
+      const xFormula = `=$S$13+($S$14-$S$13)*${ratio}`;
+      [[xFormula, '=$U$13', xValue, results.level25], [xFormula, '=$T$13', xValue, results.level75], ['=NA()', '=NA()', NaN, NaN]].forEach(([xFormulaText, yFormulaText, xResult, yResult]) => {
+        worksheet.getCell(`V${drainageBandRow}`).value = formulaValue(xFormulaText, xResult);
+        worksheet.getCell(`W${drainageBandRow}`).value = formulaValue(yFormulaText, yResult);
+        worksheet.getCell(`V${drainageBandRow}`).protection = { locked: true };
+        worksheet.getCell(`W${drainageBandRow}`).protection = { locked: true };
+        drainageBand.xValues.push(xResult);
+        drainageBand.yValues.push(yResult);
+        drainageBandRow += 1;
+      });
+    }
+    drainageBand.endRow = drainageBandRow - 1;
 
     mergeValue(worksheet, 'G41:M41', 'BRE 365 DATA ANALYSIS', {
       fill: BRAND.section,
@@ -1412,7 +1454,7 @@
       objects: false,
       scenarios: true,
     });
-    return { worksheet, name, points, results, chartLabels, pitDimensions, pitChartSeries, footerRow, firstDataRow, lastDataRow };
+    return { worksheet, name, points, results, chartLabels, pitDimensions, pitChartSeries, drainageBand, footerRow, firstDataRow, lastDataRow };
   }
 
   function downloadBuffer(buffer, filename) {

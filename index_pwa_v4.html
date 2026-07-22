@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Brownfield Solutions Soakaway Logger - v4.5.0</title>
+  <title>Brownfield Solutions Soakaway Logger - v4.14.1</title>
   <link rel="manifest" href="./manifest.json" />
   <link rel="apple-touch-icon" href="./icon-192.png" />
   <link rel="icon" href="./icon-192.png" />
@@ -413,14 +413,10 @@
       </div>
       <div>
         <label>Void Ratio</label>
-        <div class="grid-2">
-          <select id="voidRatio">
-            <option value="1">Open (1)</option>
-            <option value="0.3">Single size stone (0.3)</option>
-            <option value="">Other</option>
-          </select>
-          <input type="number" id="voidRatioOther" placeholder="Custom value" style="display: none;" />
-        </div>
+        <select id="voidRatio">
+          <option value="1">Open pit (1.00)</option>
+          <option value="0.3">Single-size stone (0.30)</option>
+        </select>
       </div>
       <div class="grid-2">
         <label>Strata Description <textarea id="strataDescription" placeholder="Sand over clay..."></textarea></label>
@@ -526,7 +522,7 @@
  
   <!-- App base: version + install status (moved from header) -->
   <div style="text-align:center; margin-top:8px;">
-    <span id="appVersionBadge" class="version-badge" aria-hidden="true" title="App version">v4.5.0</span>
+    <span id="appVersionBadge" class="version-badge" aria-hidden="true" title="App version">v4.14.1</span>
     <span id="installStatus" class="version-badge" aria-hidden="true" title="Install status">Not installed</span>
     <button id="appUpdateButton" class="version-badge update-badge" type="button" hidden>Update ready - reload</button>
   </div>
@@ -606,12 +602,12 @@
 
   <script src="./exceljs.min.js"></script>
   <script src="./jszip.min.js"></script>
-  <script src="./brownfield-logo-data.js?v=4.5.0"></script>
-  <script src="./excel-report-v4.js?v=4.5.0"></script>
+  <script src="./brownfield-logo-data.js?v=4.14.1"></script>
+  <script src="./excel-report-v4.js?v=4.14.1"></script>
   <script>
     'use strict';
 
-    const APP_VERSION = 'v4.5.0';
+    const APP_VERSION = 'v4.14.1';
     const SERVICE_WORKER_VERSION = APP_VERSION.replace(/^v/, '');
 
     function showAppUpdateReady() {
@@ -701,7 +697,7 @@
       s.widthBottom = document.getElementById('widthBottom').value;
       s.depthTested = document.getElementById('depthTested').value;
       s.depthExcavation = document.getElementById('depthExcavation').value;
-      s.voidRatio = document.getElementById('voidRatio').value || document.getElementById('voidRatioOther').value;
+      s.voidRatio = document.getElementById('voidRatio').value;
       s.strataDescription = document.getElementById('strataDescription').value;
       s.pitDetails = document.getElementById('pitDetails').value;
       s.points = points.slice();
@@ -814,19 +810,7 @@
       document.getElementById('widthBottom').value = s.widthBottom || s.widthTop || '';
       document.getElementById('depthTested').value = s.depthTested || '';
       document.getElementById('depthExcavation').value = s.depthExcavation || '';
-      if (s.voidRatio === '1' || s.voidRatio === '0.3') {
-        document.getElementById('voidRatio').value = s.voidRatio;
-        document.getElementById('voidRatioOther').style.display = 'none';
-        document.getElementById('voidRatioOther').value = '';
-      } else if (s.voidRatio) {
-        document.getElementById('voidRatio').value = '';
-        document.getElementById('voidRatioOther').value = s.voidRatio;
-        document.getElementById('voidRatioOther').style.display = 'block';
-      } else {
-        document.getElementById('voidRatio').value = '1';
-        document.getElementById('voidRatioOther').style.display = 'none';
-        document.getElementById('voidRatioOther').value = '';
-      }
+      document.getElementById('voidRatio').value = String(s.voidRatio) === '0.3' ? '0.3' : '1';
       document.getElementById('strataDescription').value = s.strataDescription || '';
       document.getElementById('pitDetails').value = s.pitDetails || '';
 
@@ -978,7 +962,7 @@
          widthBottom: document.getElementById('widthBottom').value,
          depthTested: document.getElementById('depthTested').value,
          depthExcavation: document.getElementById('depthExcavation').value,
-         voidRatio: document.getElementById('voidRatio').value || document.getElementById('voidRatioOther').value,
+         voidRatio: document.getElementById('voidRatio').value,
          strataDescription: document.getElementById('strataDescription').value,
          pitDetails: document.getElementById('pitDetails').value,
         points: points,
@@ -997,18 +981,7 @@
       document.getElementById('widthBottom').value = data.widthBottom || data.widthTop || '';
       document.getElementById('depthTested').value = data.depthTested || '';
       document.getElementById('depthExcavation').value = data.depthExcavation || '';
-      if (data.voidRatio === '1' || data.voidRatio === '0.3') {
-        document.getElementById('voidRatio').value = data.voidRatio;
-        document.getElementById('voidRatioOther').style.display = 'none';
-      } else if (data.voidRatio) {
-        document.getElementById('voidRatio').value = '';
-        document.getElementById('voidRatioOther').value = data.voidRatio;
-        document.getElementById('voidRatioOther').style.display = 'block';
-      } else {
-        document.getElementById('voidRatio').value = '1';
-        document.getElementById('voidRatioOther').style.display = 'none';
-        document.getElementById('voidRatioOther').value = '';
-      }
+      document.getElementById('voidRatio').value = String(data.voidRatio) === '0.3' ? '0.3' : '1';
       document.getElementById('strataDescription').value = data.strataDescription || '';
       document.getElementById('pitDetails').value = data.pitDetails || '';
       points = data.points || [];
@@ -1581,17 +1554,7 @@
       if (confirm('Clear current test data?')) resetForm();
     });
 
-    // Void ratio other
-    document.getElementById('voidRatio').addEventListener('change', (e) => {
-      const other = document.getElementById('voidRatioOther');
-      if (e.target.value === '') {
-        other.style.display = 'block';
-      } else {
-        other.style.display = 'none';
-        other.value = '';
-      }
-      autoSaveCurrent();
-    });
+    document.getElementById('voidRatio').addEventListener('change', autoSaveCurrent);
 
     // Bottom tracking top
     function trackBottom(idTop, idBottom, independentFlag) {

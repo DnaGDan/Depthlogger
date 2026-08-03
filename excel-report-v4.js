@@ -8,6 +8,7 @@
     paleBlue: 'DDEBF7',
     paleGreen: 'E2F0D9',
     paleRed: 'FCE4D6',
+    manualInput: 'FFF200',
     white: 'FFFFFF',
     dark: '1F2937',
     border: '7F8C8D',
@@ -148,6 +149,66 @@
       minimumHead,
       compliance: points.length ? (compliant ? 'Compliant with BRE 365' : 'Not compliant - test did not drain past 25% effective depth') : 'No readings recorded',
     };
+  }
+
+  function requiresManualInfiltrationRate(points, results) {
+    return points.length >= 2
+      && Number.isFinite(results.initialHead)
+      && !(Number.isFinite(results.time75)
+        && Number.isFinite(results.time25)
+        && Number.isFinite(results.drainTime)
+        && results.drainTime > 0);
+  }
+
+  function representativePointIndices(points, capacity, excavationDepth, levels = []) {
+    if (!Array.isArray(points) || points.length <= capacity) return points.map((_, index) => index);
+    const selected = new Set([0, points.length - 1]);
+    const finiteLevels = levels.filter(Number.isFinite);
+    finiteLevels.forEach(targetHead => {
+      for (let index = 1; index < points.length; index += 1) {
+        const previousHead = excavationDepth - points[index - 1].depth;
+        const currentHead = excavationDepth - points[index].depth;
+        if (previousHead >= targetHead && currentHead <= targetHead) {
+          selected.add(index - 1);
+          selected.add(index);
+          break;
+        }
+      }
+    });
+
+    const firstTime = points[0].time;
+    const lastTime = points[points.length - 1].time;
+    for (let slot = 0; slot < capacity && selected.size < capacity; slot += 1) {
+      const targetTime = firstTime + (lastTime - firstTime) * slot / Math.max(1, capacity - 1);
+      let nearestIndex = -1;
+      let nearestDistance = Infinity;
+      points.forEach((point, index) => {
+        if (selected.has(index)) return;
+        const distance = Math.abs(point.time - targetTime);
+        if (distance < nearestDistance) {
+          nearestDistance = distance;
+          nearestIndex = index;
+        }
+      });
+      if (nearestIndex >= 0) selected.add(nearestIndex);
+    }
+
+    while (selected.size < capacity) {
+      const selectedTimes = [...selected].map(index => points[index].time);
+      let bestIndex = -1;
+      let widestGap = -1;
+      points.forEach((point, index) => {
+        if (selected.has(index)) return;
+        const nearestDistance = Math.min(...selectedTimes.map(time => Math.abs(point.time - time)));
+        if (nearestDistance > widestGap) {
+          widestGap = nearestDistance;
+          bestIndex = index;
+        }
+      });
+      if (bestIndex < 0) break;
+      selected.add(bestIndex);
+    }
+    return [...selected].sort((left, right) => left - right).slice(0, capacity);
   }
 
   function fill(color) {
@@ -424,6 +485,13 @@
 
   function drainageChartXml(artifact, chartNumber) {
     const { name, points, results, firstDataRow, lastDataRow, drainageBand } = artifact;
+    const timeRange = artifact.chartTimeRange || `$C$${firstDataRow}:$C$${lastDataRow}`;
+    const headRange = artifact.chartHeadRange || `$E$${firstDataRow}:$E$${lastDataRow}`;
+    const thresholdTimeRange = artifact.thresholdTimeRange || '$S$13:$S$14';
+    const threshold75Range = artifact.threshold75Range || '$T$13:$T$14';
+    const threshold25Range = artifact.threshold25Range || '$U$13:$U$14';
+    const bandXRange = drainageBand.xRange || `$V$${drainageBand.startRow}:$V$${drainageBand.endRow}`;
+    const bandYRange = drainageBand.yRange || `$W$${drainageBand.startRow}:$W$${drainageBand.endRow}`;
     const times = points.map(point => point.time);
     const heads = points.map(point => results.excavation - point.depth);
     const minTime = times.length ? Math.min(...times) : 0;
@@ -431,10 +499,10 @@
     const xAxisId = 70000000 + chartNumber * 10 + 1;
     const yAxisId = xAxisId + 1;
     const series = [
-      referencedSeries(0, '25% to 75% effective depth band', chartFormula(name, `$V$${drainageBand.startRow}:$V$${drainageBand.endRow}`), drainageBand.xValues, chartFormula(name, `$W$${drainageBand.startRow}:$W$${drainageBand.endRow}`), drainageBand.yValues, 'FFF59D', { width: 38100, alpha: 30000 }),
-      referencedSeries(1, 'Head of water', chartFormula(name, `$C$${firstDataRow}:$C$${lastDataRow}`), times, chartFormula(name, `$E$${firstDataRow}:$E$${lastDataRow}`), heads, '00A651', { marker: true, width: 28575 }),
-      referencedSeries(2, '75% effective depth', chartFormula(name, '$S$13:$S$14'), [minTime, maxTime], chartFormula(name, '$T$13:$T$14'), [results.level75, results.level75], 'C0504D', { width: 19050 }),
-      referencedSeries(3, '25% effective depth', chartFormula(name, '$S$13:$S$14'), [minTime, maxTime], chartFormula(name, '$U$13:$U$14'), [results.level25, results.level25], '70AD47', { width: 19050 }),
+      referencedSeries(0, '25% to 75% effective depth band', chartFormula(name, bandXRange), drainageBand.xValues, chartFormula(name, bandYRange), drainageBand.yValues, 'FFF59D', { width: 38100, alpha: 30000 }),
+      referencedSeries(1, 'Head of water', chartFormula(name, timeRange), times, chartFormula(name, headRange), heads, '00A651', { marker: true, width: 28575 }),
+      referencedSeries(2, '75% effective depth', chartFormula(name, thresholdTimeRange), [minTime, maxTime], chartFormula(name, threshold75Range), [results.level75, results.level75], 'C0504D', { width: 19050 }),
+      referencedSeries(3, '25% effective depth', chartFormula(name, thresholdTimeRange), [minTime, maxTime], chartFormula(name, threshold25Range), [results.level25, results.level25], '70AD47', { width: 19050 }),
     ].join('');
     return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><c:date1904 val="0"/><c:lang val="en-GB"/><c:roundedCorners val="0"/><c:chart>${chartTitleXml('Head of water against time')}<c:plotArea><c:layout/><c:scatterChart><c:scatterStyle val="lineMarker"/><c:varyColors val="0"/>${series}<c:dLbls><c:showLegendKey val="0"/><c:showVal val="0"/><c:showCatName val="0"/><c:showSerName val="0"/><c:showPercent val="0"/><c:showBubbleSize val="0"/></c:dLbls><c:axId val="${xAxisId}"/><c:axId val="${yAxisId}"/></c:scatterChart><c:valAx><c:axId val="${xAxisId}"/><c:scaling><c:orientation val="minMax"/><c:min val="0"/></c:scaling><c:delete val="0"/><c:axPos val="b"/>${axisTitleXml('Time (minutes)')}<c:numFmt formatCode="0.0" sourceLinked="0"/><c:majorTickMark val="out"/><c:minorTickMark val="none"/><c:tickLblPos val="nextTo"/><c:spPr><a:ln><a:solidFill><a:srgbClr val="234A5A"/></a:solidFill></a:ln></c:spPr><c:crossAx val="${yAxisId}"/><c:crosses val="autoZero"/><c:crossBetween val="midCat"/></c:valAx><c:valAx><c:axId val="${yAxisId}"/><c:scaling><c:orientation val="minMax"/><c:min val="0"/></c:scaling><c:delete val="0"/><c:axPos val="l"/>${axisTitleXml('Head of water (mm)')}<c:majorGridlines><c:spPr><a:ln w="9525"><a:solidFill><a:srgbClr val="DDEBF7"/></a:solidFill></a:ln></c:spPr></c:majorGridlines><c:numFmt formatCode="0" sourceLinked="0"/><c:majorTickMark val="out"/><c:minorTickMark val="none"/><c:tickLblPos val="nextTo"/><c:spPr><a:ln><a:solidFill><a:srgbClr val="234A5A"/></a:solidFill></a:ln></c:spPr><c:crossAx val="${xAxisId}"/><c:crosses val="autoZero"/><c:crossBetween val="midCat"/></c:valAx></c:plotArea><c:legend><c:legendPos val="b"/><c:legendEntry><c:idx val="0"/><c:delete val="1"/></c:legendEntry><c:layout/><c:overlay val="0"/></c:legend><c:plotVisOnly val="0"/><c:dispBlanksAs val="gap"/><c:showDLblsOverMax val="0"/></c:chart><c:spPr><a:solidFill><a:srgbClr val="FFFFFF"/></a:solidFill><a:ln><a:noFill/></a:ln></c:spPr><c:printSettings><c:headerFooter/><c:pageMargins b="0.75" l="0.7" r="0.7" t="0.75" header="0.3" footer="0.3"/><c:pageSetup/></c:printSettings></c:chartSpace>`;
   }
@@ -510,9 +578,11 @@
     return { lengthTop, lengthBottom, widthTop, widthBottom, excavationDepth, initialHead, waterFraction, stoneDepth, stoneFraction, projection, rawMinX, rawMaxX, rawMaxY, scale, translateX, translateY, pitMinX, pitMaxX, topLengthY, bottomLengthY, depthX, headX, points, interpolate };
   }
 
-  function buildPitChartModel(worksheet, sheetName, pitDimensions, chartLabels) {
+  function buildPitChartModel(worksheet, sheetName, pitDimensions, chartLabels, options = {}) {
     const geometry = calculatePitGeometry(pitDimensions);
     const stoneEnabled = Math.abs(Number(pitDimensions.voidRatio) - 0.3) < 0.001;
+    const labelCells = options.labelCells || ['$R$13', '$R$14', '$R$15', '$R$16', '$R$17', '$R$18'];
+    const stoneDepthCell = options.stoneDepthCell || '$R$27';
     const pointRows = {
       bottomFrontLeft: 90, bottomFrontRight: 91, bottomBackLeft: 92, bottomBackRight: 93,
       topFrontLeft: 94, topFrontRight: 95, topBackLeft: 96, topBackRight: 97,
@@ -552,7 +622,7 @@
       [79, 'Bottom length dimension Y', '=MIN($AA$90,$AA$91)-0.35', geometry.bottomLengthY],
       [80, 'Depth dimension X', '=$AC$76-0.45', geometry.depthX],
       [81, 'Head dimension X', '=$AC$77+0.48', geometry.headX],
-      [82, 'Stone fill depth', '=MAX(0,MIN(IF($R$27="",$AC$65,IFERROR($R$27,$AC$65)),$AC$65))', geometry.stoneDepth],
+      [82, 'Stone fill depth', `=MAX(0,MIN(IF(${stoneDepthCell}="",$AC$65,IFERROR(${stoneDepthCell},$AC$65)),$AC$65))`, geometry.stoneDepth],
       [83, 'Stone fill fraction', '=IFERROR($AC$82/$AC$65,1)', geometry.stoneFraction],
     ];
     scalars.forEach(([row, label, formula, result]) => {
@@ -766,12 +836,12 @@
     addSeries({ type: 'line', name: 'Water head bottom marker', color: blue, options: { dash: 'dash', width: 9525 } }, [ref('bottomBackRight'), ref('headBottom')]);
     addSeries({ type: 'line', name: 'Water head dimension', color: blue, options: { arrows: true, width: 12700 } }, [ref('headBottom'), ref('headTop')]);
     const labels = [
-      ['Top length label', 'topLengthLabel', '$R$13', chartLabels.topLength, 't', dark],
-      ['Top width label', 'topWidthLabel', '$R$14', chartLabels.topWidth, 'r', dark],
-      ['Excavation depth label', 'depthLabel', '$R$15', chartLabels.excavationDepth, 'l', dark],
-      ['Head of water label', 'headLabel', '$R$16', chartLabels.headOfWater, 'r', blue],
-      ['Bottom width label', 'bottomWidthLabel', '$R$17', chartLabels.bottomWidth, 't', dark],
-      ['Bottom length label', 'bottomLengthLabel', '$R$18', chartLabels.bottomLength, 'b', dark],
+      ['Top length label', 'topLengthLabel', labelCells[0], chartLabels.topLength, 't', dark],
+      ['Top width label', 'topWidthLabel', labelCells[1], chartLabels.topWidth, 'r', dark],
+      ['Excavation depth label', 'depthLabel', labelCells[2], chartLabels.excavationDepth, 'l', dark],
+      ['Head of water label', 'headLabel', labelCells[3], chartLabels.headOfWater, 'r', blue],
+      ['Bottom width label', 'bottomWidthLabel', labelCells[4], chartLabels.bottomWidth, 't', dark],
+      ['Bottom length label', 'bottomLengthLabel', labelCells[5], chartLabels.bottomLength, 'b', dark],
     ];
     labels.forEach(([labelName, pointKey, labelCell, labelValue, position, color]) => addSeries({ type: 'label', name: labelName, color, options: {}, labelFormula: chartFormula(sheetName, labelCell), labelValue, position }, [ref(pointKey)]));
     addSeries({ type: 'line', name: 'Top outline foreground', color: orange, options: { width: 38100 } }, [ref('topFrontLeft'), ref('topBackLeft'), ref('topBackRight'), ref('topFrontRight'), ref('topFrontLeft')]);
@@ -985,10 +1055,10 @@
     if (!window.JSZip) throw new Error('Excel chart packaging library did not load. Reload the app and try again.');
     const zip = await window.JSZip.loadAsync(buffer);
     let contentTypes = await zip.file('[Content_Types].xml').async('string');
+    let nextChartNumber = 1;
+    let nextDrawingId = 100;
     for (let index = 0; index < artifacts.length; index += 1) {
       const sheetNumber = index + 1;
-      const pitChartNumber = index * 2 + 1;
-      const drainageChartNumber = pitChartNumber + 1;
       const drawingPath = `xl/drawings/drawing${sheetNumber}.xml`;
       const relationshipsPath = `xl/drawings/_rels/drawing${sheetNumber}.xml.rels`;
       const drawingFile = zip.file(drawingPath);
@@ -996,18 +1066,38 @@
       if (!drawingFile || !relationshipsFile) throw new Error(`Could not attach native charts to worksheet ${sheetNumber}.`);
       let drawingXml = await drawingFile.async('string');
       let relationshipsXml = await relationshipsFile.async('string');
-      const pitRelationship = `rIdNativePit${sheetNumber}`;
-      const drainageRelationship = `rIdNativeDrainage${sheetNumber}`;
-      const anchors = nativeChartAnchor(100 + index * 2, 'Test pit construction', pitRelationship, 6, 12, 12, 22)
-        + nativeChartAnchor(101 + index * 2, 'Head of water against time', drainageRelationship, 6, 25, 12, 40);
+      const chartDefinitions = artifacts[index].nativeCharts || [
+        { kind: 'pit', name: 'Test pit construction', artifact: artifacts[index], fromColumn: 6, fromRow: 12, toColumn: 12, toRow: 22 },
+        { kind: 'drainage', name: 'Head of water against time', artifact: artifacts[index], fromColumn: 6, fromRow: 25, toColumn: 12, toRow: 40 },
+      ];
+      let anchors = '';
+      let chartRelationships = '';
+      let chartOverrides = '';
+      chartDefinitions.forEach((definition, chartIndex) => {
+        const chartNumber = nextChartNumber++;
+        const relationshipId = `rIdNativeChart${sheetNumber}x${chartIndex + 1}`;
+        anchors += nativeChartAnchor(
+          nextDrawingId++,
+          definition.name,
+          relationshipId,
+          definition.fromColumn,
+          definition.fromRow,
+          definition.toColumn,
+          definition.toRow,
+        );
+        chartRelationships += `<Relationship Id="${relationshipId}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart" Target="../charts/chart${chartNumber}.xml"/>`;
+        const chartArtifact = definition.artifact || artifacts[index];
+        zip.file(
+          `xl/charts/chart${chartNumber}.xml`,
+          definition.kind === 'pit' ? pitChartXml(chartArtifact, chartNumber) : drainageChartXml(chartArtifact, chartNumber),
+        );
+        chartOverrides += `<Override PartName="/xl/charts/chart${chartNumber}.xml" ContentType="application/vnd.openxmlformats-officedocument.drawingml.chart+xml"/>`;
+      });
       drawingXml = drawingXml.replace('</xdr:wsDr>', `${anchors}</xdr:wsDr>`);
-      const chartRelationships = `<Relationship Id="${pitRelationship}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart" Target="../charts/chart${pitChartNumber}.xml"/><Relationship Id="${drainageRelationship}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart" Target="../charts/chart${drainageChartNumber}.xml"/>`;
       relationshipsXml = relationshipsXml.replace('</Relationships>', `${chartRelationships}</Relationships>`);
       zip.file(drawingPath, drawingXml);
       zip.file(relationshipsPath, relationshipsXml);
-      zip.file(`xl/charts/chart${pitChartNumber}.xml`, pitChartXml(artifacts[index], pitChartNumber));
-      zip.file(`xl/charts/chart${drainageChartNumber}.xml`, drainageChartXml(artifacts[index], drainageChartNumber));
-      contentTypes = contentTypes.replace('</Types>', `<Override PartName="/xl/charts/chart${pitChartNumber}.xml" ContentType="application/vnd.openxmlformats-officedocument.drawingml.chart+xml"/><Override PartName="/xl/charts/chart${drainageChartNumber}.xml" ContentType="application/vnd.openxmlformats-officedocument.drawingml.chart+xml"/></Types>`);
+      contentTypes = contentTypes.replace('</Types>', `${chartOverrides}</Types>`);
     }
     zip.file('[Content_Types].xml', contentTypes);
     return zip.generateAsync({ type: 'arraybuffer', compression: 'DEFLATE', compressionOptions: { level: 6 } });
@@ -1024,10 +1114,21 @@
   async function buildWorksheet(workbook, session, name, logoBase64) {
     const points = normalizePoints(session);
     const results = calculateResults(session, points);
-    const rowCount = Math.max(points.length, 43);
+    const mainDataCapacity = 42;
+    const mainReservedRows = 43;
+    const hasDataAppendix = points.length > mainDataCapacity;
+    const representativeIndices = representativePointIndices(points, mainDataCapacity, results.excavation, [results.level75, results.level25]);
+    const displayedPoints = hasDataAppendix ? representativeIndices.map(index => points[index]) : points;
     const firstDataRow = 14;
-    const lastDataRow = firstDataRow + rowCount - 1;
-    const footerRow = Math.max(lastDataRow, 56);
+    const lastDataRow = firstDataRow + mainReservedRows - 1;
+    const lastDisplayedDataRow = firstDataRow + Math.max(0, displayedPoints.length - 1);
+    const sourceFirstRow = 1;
+    const sourceLastRow = Math.max(points.length, 1);
+    const appendixPageCapacity = 84;
+    const appendixPageHeight = 55;
+    const appendixFirstRow = 57;
+    const appendixPageCount = hasDataAppendix ? Math.ceil(points.length / appendixPageCapacity) : 0;
+    const footerRow = hasDataAppendix ? 56 + appendixPageCount * appendixPageHeight : 56;
     const worksheet = workbook.addWorksheet(name, {
       views: [{ showGridLines: false, zoomScale: 85 }],
       properties: { defaultRowHeight: 15 },
@@ -1045,7 +1146,7 @@
       orientation: 'portrait',
       fitToPage: true,
       fitToWidth: 1,
-      fitToHeight: 1,
+      fitToHeight: hasDataAppendix ? 0 : 1,
       horizontalCentered: true,
       verticalCentered: false,
       margins: { left: 0.25, right: 0.25, top: 0.3, bottom: 0.35, header: 0.1, footer: 0.15 },
@@ -1053,8 +1154,9 @@
       showGridLines: false,
     };
     worksheet.headerFooter.oddFooter = `&L${safeSheetText(session.locationId) || 'Soakaway test'}&RPage &P of &N`;
+    let logoId = null;
     if (logoBase64) {
-      const logoId = workbook.addImage({ base64: logoBase64, extension: 'png' });
+      logoId = workbook.addImage({ base64: logoBase64, extension: 'png' });
       worksheet.addImage(logoId, { tl: { col: 0.15, row: 0.2 }, ext: { width: 235, height: 92 } });
     }
     mergeValue(worksheet, 'D1:M2', 'SOAKAWAY INFILTRATION TEST REPORT', {
@@ -1108,7 +1210,7 @@
       ['E9', 'Width at top (mm)', 'F9', asNumber(session.widthTop, null)],
       ['G9', 'Width at bottom (mm)', 'H9', asNumber(session.widthBottom || session.widthTop, null)],
       ['I9', 'Excavation depth (mm)', 'J9', asNumber(session.depthExcavation, null)],
-      ['K9', 'Depth tested (mm)', 'L9', formulaValue(`=IFERROR($J$9-$D$${firstDataRow},"")`, results.initialHead)],
+      ['K9', 'Depth tested (mm)', 'L9', formulaValue('=IFERROR($J$9-$AI$1,"")', results.initialHead)],
       ['A10', 'Void ratio', 'B10', asNumber(session.voidRatio, 1)],
     ];
     parameters.forEach(([labelCell, label, valueCell, value]) => {
@@ -1153,7 +1255,10 @@
     worksheet.getRow(10).height = 20;
     worksheet.getRow(11).height = 6;
 
-    mergeValue(worksheet, 'A12:F12', 'SITE RECORDED DATA', {
+    const recordedDataTitle = hasDataAppendix
+      ? `SITE RECORDED DATA — REPRESENTATIVE SAMPLE (${representativeIndices.length} OF ${points.length})`
+      : 'SITE RECORDED DATA';
+    mergeValue(worksheet, 'A12:F12', recordedDataTitle, {
       fill: BRAND.section,
       font: { name: 'Arial', size: 10, bold: true, color: { argb: BRAND.white } },
       alignment: { horizontal: 'center', vertical: 'middle' },
@@ -1271,8 +1376,8 @@
       font: { name: 'Arial', size: 9, bold: true, color: { argb: BRAND.white } },
       alignment: { horizontal: 'center', vertical: 'middle' },
     });
-    worksheet.getCell('S13').value = formulaValue(`=IF(COUNT($C$${firstDataRow}:$C$${lastDataRow})=0,0,MIN($C$${firstDataRow}:$C$${lastDataRow}))`, chartMinTime);
-    worksheet.getCell('S14').value = formulaValue(`=IF(COUNT($C$${firstDataRow}:$C$${lastDataRow})=0,1,MAX($C$${firstDataRow}:$C$${lastDataRow}))`, chartMaxTime);
+    worksheet.getCell('S13').value = formulaValue(`=IF(COUNT($AH$${sourceFirstRow}:$AH$${sourceLastRow})=0,0,MIN($AH$${sourceFirstRow}:$AH$${sourceLastRow}))`, chartMinTime);
+    worksheet.getCell('S14').value = formulaValue(`=IF(COUNT($AH$${sourceFirstRow}:$AH$${sourceLastRow})=0,1,MAX($AH$${sourceFirstRow}:$AH$${sourceLastRow}))`, chartMaxTime);
     worksheet.getCell('T13').value = formulaValue('=$J$44', results.level75);
     worksheet.getCell('T14').value = formulaValue('=$J$44', results.level75);
     worksheet.getCell('U13').value = formulaValue('=$J$45', results.level25);
@@ -1331,18 +1436,173 @@
       });
     });
 
-    for (let offset = 0; offset < rowCount; offset += 1) {
+    const visiblePointSources = new Array(points.length);
+    const appendixHeadings = ['No.', 'Date', 'Clock time', 'Time (mins)', 'Depth to water (mm)', 'Head of water (mm)'];
+    const writeAppendixPoint = (pointIndex, rowNumber, startColumn) => {
+      const point = points[pointIndex];
+      const timestamp = point && point.timestamp ? new Date(point.timestamp) : null;
+      const depthAddress = worksheet.getCell(rowNumber, startColumn + 4).address;
+      const head = point ? results.excavation - point.depth : null;
+      const values = point ? [
+        pointIndex + 1,
+        timestamp || null,
+        timestamp || point.clockTime || null,
+        point.time,
+        point.depth,
+        formulaValue(`=IF(${depthAddress}="","",$J$9-${depthAddress})`, head),
+      ] : [null, null, null, null, null, null];
+      values.forEach((value, offset) => {
+        const cell = worksheet.getCell(rowNumber, startColumn + offset);
+        cell.value = value;
+        applyCellStyle(cell, {
+          fill: offset === 5 ? BRAND.paleBlue : BRAND.white,
+          font: { name: 'Arial', size: 8, color: { argb: BRAND.dark } },
+          alignment: { horizontal: 'center', vertical: 'middle', wrapText: true },
+          numFmt: offset === 1 ? 'dd/mm/yyyy' : offset === 2 && timestamp ? 'hh:mm:ss' : offset >= 3 ? '0.00' : undefined,
+        });
+        cell.protection = { locked: !point || offset === 0 || offset === 5 };
+      });
+      if (point) {
+        visiblePointSources[pointIndex] = {
+          date: worksheet.getCell(rowNumber, startColumn + 1).address,
+          clock: worksheet.getCell(rowNumber, startColumn + 2).address,
+          time: worksheet.getCell(rowNumber, startColumn + 3).address,
+          depth: worksheet.getCell(rowNumber, startColumn + 4).address,
+          head: worksheet.getCell(rowNumber, startColumn + 5).address,
+        };
+      }
+    };
+
+    const appendixValue = (formula, result) => formulaValue(formula, result == null ? '' : result);
+    const buildAppendixPage = pageIndex => {
+      const startRow = appendixFirstRow + pageIndex * appendixPageHeight;
+      const pointOffset = pageIndex * appendixPageCapacity;
+      if (logoBase64) {
+        const appendixLogoId = workbook.addImage({ base64: logoBase64, extension: 'png' });
+        worksheet.addImage(appendixLogoId, { tl: { col: 0.15, row: startRow - 0.2 }, ext: { width: 235, height: 92 } });
+      }
+      mergeValue(worksheet, `D${startRow}:M${startRow + 1}`, 'SOAKAWAY INFILTRATION TEST REPORT', {
+        border: false,
+        font: { name: 'Arial', size: 14, bold: true, color: { argb: BRAND.navy } },
+        alignment: { horizontal: 'right', vertical: 'middle' },
+      });
+      mergeValue(worksheet, `D${startRow + 2}:M${startRow + 3}`, `${safeSheetText(session.locationId) || 'Unnamed location'} — ${compactTestLabel(session.testNumber)} — COMPLETE RECORDED DATA`, {
+        border: false,
+        font: { name: 'Arial', size: 12, bold: true, color: { argb: BRAND.blue } },
+        alignment: { horizontal: 'right', vertical: 'top' },
+      });
+      worksheet.getRow(startRow).height = 27;
+      worksheet.getRow(startRow + 1).height = 27;
+      worksheet.getRow(startRow + 2).height = 20;
+      worksheet.getRow(startRow + 3).height = 20;
+
+      mergeValue(worksheet, `A${startRow + 4}:M${startRow + 4}`, 'TEST DETAILS', {
+        fill: BRAND.section,
+        font: { name: 'Arial', size: 10, bold: true, color: { argb: BRAND.white } },
+        alignment: { horizontal: 'center', vertical: 'middle' },
+      });
+      const detailRows = [
+        [`A${startRow + 5}`, 'Location ID', `B${startRow + 5}:D${startRow + 5}`, appendixValue('=$B$6', safeSheetText(session.locationId))],
+        [`E${startRow + 5}`, 'Test Number', `F${startRow + 5}:G${startRow + 5}`, appendixValue('=$F$6', safeSheetText(session.testNumber))],
+        [`H${startRow + 5}`, 'Date of Test', `I${startRow + 5}:J${startRow + 5}`, appendixValue('=IF($I$6="","",$I$6)', dateValue)],
+        [`K${startRow + 5}`, 'Logged By', `L${startRow + 5}:M${startRow + 5}`, appendixValue('=IF($L$6="","",$L$6)', '')],
+        [`A${startRow + 6}`, 'Site / Project', `B${startRow + 6}:G${startRow + 6}`, appendixValue('=IF($B$7="","",$B$7)', '')],
+        [`H${startRow + 6}`, 'Checked By', `I${startRow + 6}:M${startRow + 6}`, appendixValue('=IF($I$7="","",$I$7)', '')],
+      ];
+      detailRows.forEach(([labelCell, label, valueRange, value]) => {
+        worksheet.getCell(labelCell).value = label;
+        applyCellStyle(worksheet.getCell(labelCell), { fill: BRAND.paleBlue, font: { name: 'Arial', size: 8, bold: true, color: { argb: BRAND.dark } } });
+        const target = mergeValue(worksheet, valueRange, value, { fill: BRAND.white, font: { name: 'Arial', size: 9, color: { argb: BRAND.dark } } });
+        if (label === 'Date of Test') target.numFmt = 'dd/mm/yyyy';
+      });
+      worksheet.getRow(startRow + 5).height = 22;
+      worksheet.getRow(startRow + 6).height = 22;
+
+      mergeValue(worksheet, `A${startRow + 7}:M${startRow + 7}`, 'TEST PIT PARAMETERS', {
+        fill: BRAND.section,
+        font: { name: 'Arial', size: 10, bold: true, color: { argb: BRAND.white } },
+        alignment: { horizontal: 'center', vertical: 'middle' },
+      });
+      const parameterRow = startRow + 8;
+      const appendixParameters = [
+        ['A', 'Length at top (mm)', 'B', '=$B$9', asNumber(session.lengthTop, null)],
+        ['C', 'Length at bottom (mm)', 'D', '=$D$9', asNumber(session.lengthBottom || session.lengthTop, null)],
+        ['E', 'Width at top (mm)', 'F', '=$F$9', asNumber(session.widthTop, null)],
+        ['G', 'Width at bottom (mm)', 'H', '=$H$9', asNumber(session.widthBottom || session.widthTop, null)],
+        ['I', 'Excavation depth (mm)', 'J', '=$J$9', asNumber(session.depthExcavation, null)],
+        ['K', 'Depth tested (mm)', 'L', '=$L$9', results.initialHead],
+      ];
+      appendixParameters.forEach(([labelColumn, label, valueColumn, formula, result]) => {
+        worksheet.getCell(`${labelColumn}${parameterRow}`).value = label;
+        applyCellStyle(worksheet.getCell(`${labelColumn}${parameterRow}`), { fill: BRAND.paleBlue, font: { name: 'Arial', size: 8, bold: true, color: { argb: BRAND.dark } } });
+        worksheet.getCell(`${valueColumn}${parameterRow}`).value = appendixValue(formula, result);
+        applyCellStyle(worksheet.getCell(`${valueColumn}${parameterRow}`), { fill: BRAND.white, alignment: { horizontal: 'center', vertical: 'middle' }, numFmt: '0' });
+      });
+      worksheet.getCell(`M${parameterRow}`).value = 'mm';
+      applyCellStyle(worksheet.getCell(`M${parameterRow}`), { fill: BRAND.paleBlue, alignment: { horizontal: 'center', vertical: 'middle' } });
+      worksheet.getRow(parameterRow).height = 30;
+      const parameterSecondRow = startRow + 9;
+      worksheet.getCell(`A${parameterSecondRow}`).value = 'Void ratio';
+      applyCellStyle(worksheet.getCell(`A${parameterSecondRow}`), { fill: BRAND.paleBlue, font: { name: 'Arial', size: 8, bold: true, color: { argb: BRAND.dark } } });
+      worksheet.getCell(`B${parameterSecondRow}`).value = appendixValue('=$B$10', asNumber(session.voidRatio, 1));
+      applyCellStyle(worksheet.getCell(`B${parameterSecondRow}`), { fill: BRAND.white, alignment: { horizontal: 'center', vertical: 'middle' }, numFmt: '0.00' });
+      worksheet.getCell(`C${parameterSecondRow}`).value = 'Strata description';
+      applyCellStyle(worksheet.getCell(`C${parameterSecondRow}`), { fill: BRAND.paleBlue, font: { name: 'Arial', size: 8, bold: true, color: { argb: BRAND.dark } } });
+      mergeValue(worksheet, `D${parameterSecondRow}:H${parameterSecondRow}`, appendixValue('=IF($D$10="","",$D$10)', session.strataDescription || ''), { fill: BRAND.white, font: { name: 'Arial', size: 8, color: { argb: BRAND.dark } }, alignment: { horizontal: 'left', vertical: 'middle' } });
+      worksheet.getCell(`I${parameterSecondRow}`).value = 'Pit details';
+      applyCellStyle(worksheet.getCell(`I${parameterSecondRow}`), { fill: BRAND.paleBlue, font: { name: 'Arial', size: 8, bold: true, color: { argb: BRAND.dark } } });
+      mergeValue(worksheet, `J${parameterSecondRow}:M${parameterSecondRow}`, appendixValue('=IF($J$10="","",$J$10)', session.pitDetails || ''), { fill: BRAND.white, font: { name: 'Arial', size: 8, color: { argb: BRAND.dark } }, alignment: { horizontal: 'left', vertical: 'middle' } });
+      worksheet.getRow(parameterSecondRow).height = 20;
+      worksheet.getRow(startRow + 10).height = 6;
+
+      mergeValue(worksheet, `A${startRow + 11}:M${startRow + 11}`, `COMPLETE SITE RECORDED DATA — ${points.length} READINGS`, {
+        fill: BRAND.section,
+        font: { name: 'Arial', size: 10, bold: true, color: { argb: BRAND.white } },
+        alignment: { horizontal: 'center', vertical: 'middle' },
+      });
+      [1, 8].forEach(startColumn => appendixHeadings.forEach((heading, offset) => {
+        const cell = worksheet.getCell(startRow + 12, startColumn + offset);
+        cell.value = heading;
+        applyCellStyle(cell, { fill: BRAND.section, font: { name: 'Arial', size: 7, bold: true, color: { argb: BRAND.white } }, alignment: { horizontal: 'center', vertical: 'middle', wrapText: true } });
+      }));
+      worksheet.getCell(startRow + 12, 7).fill = fill(BRAND.white);
+      worksheet.getCell(startRow + 12, 7).border = {};
+      worksheet.getRow(startRow + 12).height = 30;
+      for (let localIndex = 0; localIndex < 42; localIndex += 1) {
+        const rowNumber = startRow + 13 + localIndex;
+        writeAppendixPoint(pointOffset + localIndex, rowNumber, 1);
+        writeAppendixPoint(pointOffset + 42 + localIndex, rowNumber, 8);
+        worksheet.getCell(rowNumber, 7).fill = fill(BRAND.white);
+        worksheet.getCell(rowNumber, 7).border = {};
+        worksheet.getRow(rowNumber).height = 15;
+      }
+    };
+
+    if (hasDataAppendix) {
+      for (let pageIndex = 0; pageIndex < appendixPageCount; pageIndex += 1) buildAppendixPage(pageIndex);
+      for (let pageIndex = 0; pageIndex < appendixPageCount; pageIndex += 1) worksheet.getRow(56 + pageIndex * appendixPageHeight).addPageBreak();
+    }
+
+    for (let offset = 0; offset < mainReservedRows; offset += 1) {
       const rowNumber = firstDataRow + offset;
-      const point = points[offset];
+      const point = displayedPoints[offset];
+      const sourceIndex = hasDataAppendix ? representativeIndices[offset] : offset;
       const timestamp = point && point.timestamp ? new Date(point.timestamp) : null;
       const head = point ? results.excavation - point.depth : null;
-      const cells = [
+      const source = point && hasDataAppendix ? visiblePointSources[sourceIndex] : null;
+      const cells = point ? (hasDataAppendix ? [
+        formulaValue(`=${source.date}`, timestamp || ''),
+        formulaValue(`=${source.clock}`, timestamp || point.clockTime || ''),
+        formulaValue(`=${source.time}`, point.time),
+        formulaValue(`=${source.depth}`, point.depth),
+        formulaValue(`=${source.head}`, head),
+      ] : [
         timestamp || null,
-        timestamp || (point ? point.clockTime : null),
-        point ? point.time : null,
-        point ? point.depth : null,
-        point ? formulaValue(`=IF(D${rowNumber}="","",$J$9-D${rowNumber})`, head) : null,
-      ];
+        timestamp || point.clockTime || null,
+        point.time,
+        point.depth,
+        formulaValue(`=IF(D${rowNumber}="","",$J$9-D${rowNumber})`, head),
+      ]) : [null, null, null, null, null];
       cells.forEach((value, index) => {
         const cell = worksheet.getCell(rowNumber, index + 1);
         cell.value = value;
@@ -1351,51 +1611,89 @@
           alignment: { horizontal: 'center', vertical: 'middle' },
           numFmt: index === 0 ? 'dd/mm/yyyy' : index === 1 && timestamp ? 'hh:mm:ss' : index >= 2 ? '0.00' : undefined,
         });
+        if (hasDataAppendix) cell.protection = { locked: true };
       });
       worksheet.getCell(rowNumber, 6).border = { right: thinBorder.right };
-      [15, 16].forEach(column => {
-        applyCellStyle(worksheet.getCell(rowNumber, column), {
-          fill: BRAND.white,
-          alignment: { horizontal: 'right', vertical: 'middle' },
-          numFmt: '0.00',
-        });
-      });
-      if (offset > 0 && point) {
-        const previousHead = results.excavation - points[offset - 1].depth;
-        const currentHead = head;
-        const cross75 = previousHead >= results.level75 && currentHead <= results.level75
-          ? points[offset - 1].time + ((previousHead - results.level75) * (point.time - points[offset - 1].time)) / (previousHead - currentHead || 1)
-          : null;
-        const cross25 = previousHead >= results.level25 && currentHead <= results.level25
-          ? points[offset - 1].time + ((previousHead - results.level25) * (point.time - points[offset - 1].time)) / (previousHead - currentHead || 1)
-          : null;
-        worksheet.getCell(rowNumber, 15).value = formulaValue(`=IF(AND(E${rowNumber - 1}>=J$44,E${rowNumber}<=J$44,E${rowNumber - 1}<>E${rowNumber}),C${rowNumber - 1}+(E${rowNumber - 1}-J$44)*(C${rowNumber}-C${rowNumber - 1})/(E${rowNumber - 1}-E${rowNumber}),"")`, cross75);
-        worksheet.getCell(rowNumber, 16).value = formulaValue(`=IF(AND(E${rowNumber - 1}>=J$45,E${rowNumber}<=J$45,E${rowNumber - 1}<>E${rowNumber}),C${rowNumber - 1}+(E${rowNumber - 1}-J$45)*(C${rowNumber}-C${rowNumber - 1})/(E${rowNumber - 1}-E${rowNumber}),"")`, cross25);
+      if (point && !hasDataAppendix) {
+        visiblePointSources[offset] = {
+          date: `A${rowNumber}`,
+          clock: `B${rowNumber}`,
+          time: `C${rowNumber}`,
+          depth: `D${rowNumber}`,
+          head: `E${rowNumber}`,
+        };
       }
     }
 
+    for (let column = 34; column <= 36; column += 1) worksheet.getColumn(column).hidden = true;
+    for (let pointIndex = 0; pointIndex < points.length; pointIndex += 1) {
+      const source = visiblePointSources[pointIndex];
+      const helperRow = sourceFirstRow + pointIndex;
+      const head = results.excavation - points[pointIndex].depth;
+      worksheet.getCell(`AH${helperRow}`).value = formulaValue(`=${source.time}`, points[pointIndex].time);
+      worksheet.getCell(`AI${helperRow}`).value = formulaValue(`=${source.depth}`, points[pointIndex].depth);
+      worksheet.getCell(`AJ${helperRow}`).value = formulaValue(`=${source.head}`, head);
+      ['AH', 'AI', 'AJ'].forEach(column => {
+        worksheet.getCell(`${column}${helperRow}`).numFmt = '0.00';
+        worksheet.getCell(`${column}${helperRow}`).protection = { locked: true };
+      });
+    }
+    if (!points.length) ['AH1', 'AI1', 'AJ1'].forEach(address => {
+      worksheet.getCell(address).value = null;
+      worksheet.getCell(address).protection = { locked: true };
+    });
+
+    const crossingLastRow = firstDataRow + Math.max(points.length, 1) - 1;
+    for (let pointIndex = 0; pointIndex < Math.max(points.length, 1); pointIndex += 1) {
+      const rowNumber = firstDataRow + pointIndex;
+      [15, 16].forEach(column => applyCellStyle(worksheet.getCell(rowNumber, column), {
+        fill: BRAND.white,
+        alignment: { horizontal: 'right', vertical: 'middle' },
+        numFmt: '0.00',
+      }));
+      if (pointIndex === 0 || !points[pointIndex]) continue;
+      const previousHead = results.excavation - points[pointIndex - 1].depth;
+      const currentHead = results.excavation - points[pointIndex].depth;
+      const cross75 = previousHead >= results.level75 && currentHead <= results.level75
+        ? points[pointIndex - 1].time + ((previousHead - results.level75) * (points[pointIndex].time - points[pointIndex - 1].time)) / (previousHead - currentHead || 1)
+        : null;
+      const cross25 = previousHead >= results.level25 && currentHead <= results.level25
+        ? points[pointIndex - 1].time + ((previousHead - results.level25) * (points[pointIndex].time - points[pointIndex - 1].time)) / (previousHead - currentHead || 1)
+        : null;
+      const previousSourceRow = sourceFirstRow + pointIndex - 1;
+      const currentSourceRow = sourceFirstRow + pointIndex;
+      worksheet.getCell(rowNumber, 15).value = formulaValue(`=IF(AND($AJ$${previousSourceRow}>=J$44,$AJ$${currentSourceRow}<=J$44,$AJ$${previousSourceRow}<>$AJ$${currentSourceRow}),$AH$${previousSourceRow}+($AJ$${previousSourceRow}-J$44)*($AH$${currentSourceRow}-$AH$${previousSourceRow})/($AJ$${previousSourceRow}-$AJ$${currentSourceRow}),"")`, cross75);
+      worksheet.getCell(rowNumber, 16).value = formulaValue(`=IF(AND($AJ$${previousSourceRow}>=J$45,$AJ$${currentSourceRow}<=J$45,$AJ$${previousSourceRow}<>$AJ$${currentSourceRow}),$AH$${previousSourceRow}+($AJ$${previousSourceRow}-J$45)*($AH$${currentSourceRow}-$AH$${previousSourceRow})/($AJ$${previousSourceRow}-$AJ$${currentSourceRow}),"")`, cross25);
+    }
+
+    const manualRateRequired = requiresManualInfiltrationRate(points, results);
+    const selectedWaterLevel1 = manualRateRequired ? 'J46' : 'J44';
+    const selectedWaterLevel2 = manualRateRequired ? 'J47' : 'J45';
+    const manualVolumeDischargedFormula = '=IF(OR(J46="",J47=""),"",AVERAGE(B9*F9,D9*H9)/1000000*ABS(J46-J47)/1000*B10)';
     const analysis = [
-      [42, 'Initial head of water', `=IFERROR($J$9-$D$${firstDataRow},"")`, results.initialHead, 'mm', '0.00'],
-      [43, 'Minimum recorded head', `=IF(COUNT(E${firstDataRow}:E${lastDataRow})=0,"",MIN(E${firstDataRow}:E${lastDataRow}))`, results.minimumHead, 'mm', '0.00'],
+      [42, 'Initial head of water', '=IFERROR($J$9-$AI$1,"")', results.initialHead, 'mm', '0.00'],
+      [43, 'Minimum recorded head', `=IF(COUNT($AJ$${sourceFirstRow}:$AJ$${sourceLastRow})=0,"",MIN($AJ$${sourceFirstRow}:$AJ$${sourceLastRow}))`, results.minimumHead, 'mm', '0.00'],
       [44, 'Water level at 75% effective depth', '=J42*0.75', results.level75, 'mm', '0.00'],
       [45, 'Water level at 25% effective depth', '=J42*0.25', results.level25, 'mm', '0.00'],
-      [46, 'Interpolated time at 75% level', `=IF(COUNT(O${firstDataRow}:O${lastDataRow})=0,"",MAX(O${firstDataRow}:O${lastDataRow}))`, results.time75, 'mins', '0.00'],
-      [47, 'Interpolated time at 25% level', `=IF(COUNT(P${firstDataRow}:P${lastDataRow})=0,"",MAX(P${firstDataRow}:P${lastDataRow}))`, results.time25, 'mins', '0.00'],
-      [48, 'Time to drain 75% to 25%', '=IF(OR(J46="",J47=""),"",J47-J46)', results.drainTime, 'mins', '0.00'],
+      [46, manualRateRequired ? 'User chosen Water Level 1' : 'Interpolated time at 75% level', manualRateRequired ? null : `=IF(COUNT(O${firstDataRow}:O${crossingLastRow})=0,"",MAX(O${firstDataRow}:O${crossingLastRow}))`, manualRateRequired ? null : results.time75, manualRateRequired ? 'mm' : 'mins', '0.00', manualRateRequired],
+      [47, manualRateRequired ? 'User chosen Water Level 2' : 'Interpolated time at 25% level', manualRateRequired ? null : `=IF(COUNT(P${firstDataRow}:P${crossingLastRow})=0,"",MAX(P${firstDataRow}:P${crossingLastRow}))`, manualRateRequired ? null : results.time25, manualRateRequired ? 'mm' : 'mins', '0.00', manualRateRequired],
+      [48, manualRateRequired ? 'Time to drain from Water Level 1 to 2' : 'Time to drain 75% to 25%', manualRateRequired ? null : '=IF(OR(J46="",J47=""),"",J47-J46)', manualRateRequired ? null : results.drainTime, 'mins', '0.00', manualRateRequired],
       [49, 'Factored volume of water', '=AVERAGE(B9*F9,D9*H9)/1000000*J42/1000*B10', results.factoredVolume, 'm³', '0.000000'],
-      [50, 'Volume of water discharged', '=J49*0.5', results.volumeDischarged, 'm³', '0.000000'],
-      [51, 'Discharge area', '=((2*AVERAGE(B9,D9)+2*AVERAGE(F9,H9))/1000)*AVERAGE(J44,J45)/1000+(D9*H9/1000000)', results.dischargeArea, 'm²', '0.000000'],
-      [53, 'Soil infiltration rate', '=IFERROR(J50/J51/J48,"")', results.infiltrationMMin, 'm/min', '0.000E+00'],
-      [54, 'Soil infiltration rate', '=IFERROR(J53/60,"")', results.infiltrationMSec, 'm/sec', '0.000E+00'],
+      [50, 'Volume of water discharged', manualRateRequired ? manualVolumeDischargedFormula : '=J49*0.5', manualRateRequired ? null : results.volumeDischarged, 'm³', '0.000000'],
+      [51, 'Discharge area', manualRateRequired
+        ? `=IF(OR(${selectedWaterLevel1}="",${selectedWaterLevel2}=""),"",((2*AVERAGE(B9,D9)+2*AVERAGE(F9,H9))/1000)*AVERAGE(${selectedWaterLevel1},${selectedWaterLevel2})/1000+(D9*H9/1000000))`
+        : `=((2*AVERAGE(B9,D9)+2*AVERAGE(F9,H9))/1000)*AVERAGE(${selectedWaterLevel1},${selectedWaterLevel2})/1000+(D9*H9/1000000)`, manualRateRequired ? null : results.dischargeArea, 'm²', '0.000000'],
+      [53, 'Soil infiltration rate', '=IFERROR(J50/J51/J48,"")', manualRateRequired ? null : results.infiltrationMMin, 'm/min', '0.000E+00'],
+      [54, 'Soil infiltration rate', '=IF(J53="","",J53/60)', manualRateRequired ? null : results.infiltrationMSec, 'm/sec', '0.000E+00'],
     ];
-    analysis.forEach(([row, label, formula, result, unit, format]) => {
+    analysis.forEach(([row, label, formula, result, unit, format, isManualInput = false]) => {
       const isInfiltrationRate = row >= 53;
       mergeValue(worksheet, `G${row}:I${row}`, label, {
         fill: isInfiltrationRate ? BRAND.navy : BRAND.paleBlue,
         font: { name: 'Arial', size: isInfiltrationRate ? 9 : 8, bold: true, color: { argb: isInfiltrationRate ? BRAND.white : BRAND.dark } },
       });
-      mergeValue(worksheet, `J${row}:K${row}`, formulaValue(formula, result), {
-        fill: isInfiltrationRate ? BRAND.paleGreen : BRAND.white,
+      mergeValue(worksheet, `J${row}:K${row}`, formula ? formulaValue(formula, result) : null, {
+        fill: isManualInput ? BRAND.manualInput : isInfiltrationRate ? BRAND.paleGreen : BRAND.white,
         font: { name: 'Arial', size: isInfiltrationRate ? 10 : 9, bold: isInfiltrationRate, color: { argb: BRAND.dark } },
         alignment: { horizontal: 'right', vertical: 'middle' },
         numFmt: format,
@@ -1407,14 +1705,16 @@
       });
       if (isInfiltrationRate) worksheet.getRow(row).height = 20;
     });
+    if (manualRateRequired) worksheet.getRow(48).height = 24;
     worksheet.getRow(52).height = 12;
     mergeValue(worksheet, 'G55:I56', 'BRE 365 COMPLIANCE', { fill: BRAND.section, font: { name: 'Arial', size: 9, bold: true, color: { argb: BRAND.white } }, alignment: { horizontal: 'center', vertical: 'middle' } });
-    const complianceFormula = `=IF(COUNT(E${firstDataRow}:E${lastDataRow})=0,"No readings recorded",IF(J43<=J45,"Compliant with BRE 365","Not compliant - test did not drain past 25% effective depth"))`;
+    const complianceFormula = `=IF(COUNT($AJ$${sourceFirstRow}:$AJ$${sourceLastRow})=0,"No readings recorded",IF(J43<=J45,"Compliant with BRE 365","Not compliant - test did not drain past 25% effective depth"))`;
     mergeValue(worksheet, 'J55:M56', formulaValue(complianceFormula, results.compliance), {
       fill: results.compliance.startsWith('Compliant') ? BRAND.paleGreen : BRAND.paleRed,
       font: { name: 'Arial', size: 9, bold: true, color: { argb: BRAND.dark } },
       alignment: { horizontal: 'center', vertical: 'middle', wrapText: true },
     });
+    if (hasDataAppendix) worksheet.getRow(56).height = 6;
 
     for (let row = 5; row <= 10; row += 1) {
       worksheet.getCell(row, 1).border = { ...worksheet.getCell(row, 1).border, left: thinBorder.left };
@@ -1443,8 +1743,9 @@
     [
       'B6:D6', 'F6:G6', 'I6:J6', 'L6:M6', 'B7:G7', 'I7:M7',
       'B9', 'D9', 'F9', 'H9', 'J9', 'B10', 'D10:H10', 'J10:M10', 'R27',
-      `A${firstDataRow}:D${lastDataRow}`,
     ].forEach(address => setLocked(address, false));
+    if (manualRateRequired) setLocked('J46:K48', false);
+    if (!hasDataAppendix) setLocked(`A${firstDataRow}:D${lastDataRow}`, false);
     setLocked('R13:R18', true);
     await worksheet.protect('', {
       spinCount: 1000,
@@ -1454,7 +1755,562 @@
       objects: false,
       scenarios: true,
     });
-    return { worksheet, name, points, results, chartLabels, pitDimensions, pitChartSeries, drainageBand, footerRow, firstDataRow, lastDataRow };
+    return {
+      worksheet,
+      name,
+      points,
+      results,
+      chartLabels,
+      pitDimensions,
+      pitChartSeries,
+      drainageBand,
+      footerRow,
+      firstDataRow,
+      lastDataRow,
+      chartTimeRange: `$AH$${sourceFirstRow}:$AH$${sourceLastRow}`,
+      chartHeadRange: `$AJ$${sourceFirstRow}:$AJ$${sourceLastRow}`,
+      hasDataAppendix,
+      appendixPageCount,
+      representativeIndices,
+      lastDisplayedDataRow,
+    };
+  }
+
+  function groupedLocationId(sessions) {
+    const locations = [...new Set(sessions.map(session => safeSheetText(session.locationId).toLocaleLowerCase()).filter(Boolean))];
+    if (sessions.length < 2 || sessions.length > 3 || locations.length !== 1) {
+      throw new Error('Grouped export requires two or three selected sessions with the same nonblank Location ID.');
+    }
+    return safeSheetText(sessions[0].locationId);
+  }
+
+  async function buildGroupedWorksheet(workbook, sessions, name, logoBase64) {
+    const locationId = groupedLocationId(sessions);
+    const contexts = sessions.map((session, index) => {
+      const points = normalizePoints(session);
+      return {
+        session,
+        index,
+        points,
+        results: calculateResults(session, points),
+        sources: new Array(points.length),
+      };
+    });
+    const first = contexts[0];
+    const appendixPageCapacity = 84;
+    const appendixPageHeight = 55;
+    const appendixFirstRow = 57;
+    const totalAppendixPages = contexts.reduce(
+      (total, context) => total + Math.max(1, Math.ceil(context.points.length / appendixPageCapacity)),
+      0,
+    );
+    const footerRow = 56 + totalAppendixPages * appendixPageHeight;
+    const worksheet = workbook.addWorksheet(name, {
+      views: [{ showGridLines: false, zoomScale: 78 }],
+      properties: { defaultRowHeight: 15 },
+    });
+    worksheet.columns = [
+      { width: 11 }, { width: 11 }, { width: 10 }, { width: 11 }, { width: 11 }, { width: 7 },
+      { width: 10 }, { width: 10 }, { width: 10 }, { width: 11 }, { width: 9 }, { width: 10 }, { width: 11 },
+      { width: 3 }, { width: 18 }, { width: 18 }, { width: 18 }, { width: 18 },
+      { width: 16 }, { width: 16 }, { width: 16 },
+    ];
+    worksheet.pageSetup = {
+      paperSize: 9,
+      orientation: 'portrait',
+      fitToPage: true,
+      fitToWidth: 1,
+      fitToHeight: 0,
+      horizontalCentered: true,
+      verticalCentered: false,
+      margins: { left: 0.2, right: 0.2, top: 0.25, bottom: 0.3, header: 0.1, footer: 0.15 },
+      printArea: `A1:M${footerRow}`,
+      showGridLines: false,
+    };
+    worksheet.headerFooter.oddFooter = `&L${locationId} — grouped tests&RPage &P of &N`;
+
+    const addLogo = row => {
+      if (!logoBase64) return;
+      const imageId = workbook.addImage({ base64: logoBase64, extension: 'png' });
+      const anchorRow = row === 0 ? 0.2 : row - 0.2;
+      worksheet.addImage(imageId, { tl: { col: 0.15, row: anchorRow }, ext: { width: 235, height: 92 } });
+    };
+    addLogo(0);
+
+    const testLabels = contexts.map(context => compactTestLabel(context.session.testNumber));
+    mergeValue(worksheet, 'D1:M2', 'SOAKAWAY INFILTRATION TEST REPORT — GROUPED RUNS', {
+      border: false,
+      font: { name: 'Arial', size: 14, bold: true, color: { argb: BRAND.navy } },
+      alignment: { horizontal: 'right', vertical: 'middle' },
+    });
+    mergeValue(worksheet, 'D3:M4', `${locationId} — ${testLabels.join(' / ')}`, {
+      border: false,
+      font: { name: 'Arial', size: 12, bold: true, color: { argb: BRAND.blue } },
+      alignment: { horizontal: 'right', vertical: 'top' },
+    });
+    [1, 2].forEach(row => { worksheet.getRow(row).height = 27; });
+    [3, 4].forEach(row => { worksheet.getRow(row).height = 20; });
+
+    mergeValue(worksheet, 'A5:M5', 'TEST DETAILS', {
+      fill: BRAND.section,
+      font: { name: 'Arial', size: 10, bold: true, color: { argb: BRAND.white } },
+      alignment: { horizontal: 'center', vertical: 'middle' },
+    });
+    const firstTimestamp = contexts
+      .flatMap(context => context.points)
+      .map(point => point.timestamp)
+      .filter(Number.isFinite)
+      .sort((left, right) => left - right)[0];
+    const testDate = Number.isFinite(firstTimestamp) ? new Date(firstTimestamp) : '';
+    const details = [
+      ['A6', 'Location ID', 'B6:D6', locationId],
+      ['E6', 'Test runs', 'F6:H6', testLabels.join(', ')],
+      ['I6', 'Date of first run', 'J6:K6', testDate],
+      ['L6', 'Logged By', 'M6', null],
+      ['A7', 'Site / Project', 'B7:H7', null],
+      ['I7', 'Checked By', 'J7:M7', null],
+    ];
+    details.forEach(([labelCell, label, valueRange, value]) => {
+      worksheet.getCell(labelCell).value = label;
+      applyCellStyle(worksheet.getCell(labelCell), { fill: BRAND.paleBlue, font: { name: 'Arial', size: 8, bold: true, color: { argb: BRAND.dark } } });
+      const target = mergeValue(worksheet, valueRange, value, { fill: BRAND.white, font: { name: 'Arial', size: 9, color: { argb: BRAND.dark } } });
+      if (value instanceof Date) target.numFmt = 'dd/mm/yyyy';
+    });
+    worksheet.getRow(6).height = 22;
+    worksheet.getRow(7).height = 22;
+
+    mergeValue(worksheet, 'A8:M8', 'SHARED TEST PIT PARAMETERS', {
+      fill: BRAND.section,
+      font: { name: 'Arial', size: 10, bold: true, color: { argb: BRAND.white } },
+      alignment: { horizontal: 'center', vertical: 'middle' },
+    });
+    const session = first.session;
+    const parameters = [
+      ['A9', 'Length at top (mm)', 'B9', asNumber(session.lengthTop, null)],
+      ['C9', 'Length at bottom (mm)', 'D9', asNumber(session.lengthBottom || session.lengthTop, null)],
+      ['E9', 'Width at top (mm)', 'F9', asNumber(session.widthTop, null)],
+      ['G9', 'Width at bottom (mm)', 'H9', asNumber(session.widthBottom || session.widthTop, null)],
+      ['I9', 'Excavation depth (mm)', 'J9', asNumber(session.depthExcavation, null)],
+      ['K9', `${testLabels[0]} initial head (mm)`, 'L9', first.results.initialHead],
+    ];
+    parameters.forEach(([labelCell, label, valueCell, value]) => {
+      worksheet.getCell(labelCell).value = label;
+      applyCellStyle(worksheet.getCell(labelCell), { fill: BRAND.paleBlue, font: { name: 'Arial', size: 8, bold: true, color: { argb: BRAND.dark } } });
+      worksheet.getCell(valueCell).value = value;
+      applyCellStyle(worksheet.getCell(valueCell), { fill: BRAND.white, alignment: { horizontal: 'center', vertical: 'middle' }, numFmt: '0' });
+    });
+    worksheet.getCell('M9').value = 'mm';
+    applyCellStyle(worksheet.getCell('M9'), { fill: BRAND.paleBlue, alignment: { horizontal: 'center', vertical: 'middle' } });
+    worksheet.getRow(9).height = 30;
+    worksheet.getCell('A10').value = 'Void ratio';
+    applyCellStyle(worksheet.getCell('A10'), { fill: BRAND.paleBlue, font: { name: 'Arial', size: 8, bold: true, color: { argb: BRAND.dark } } });
+    worksheet.getCell('B10').value = asNumber(session.voidRatio, 1);
+    applyCellStyle(worksheet.getCell('B10'), { fill: BRAND.white, alignment: { horizontal: 'center', vertical: 'middle' }, numFmt: '0.00' });
+    worksheet.getCell('B10').dataValidation = {
+      type: 'list', allowBlank: false, formulae: ['"1.00,0.30"'],
+      showInputMessage: true, promptTitle: 'Void ratio', prompt: '1.00 = open pit; 0.30 = single-size stone',
+      showErrorMessage: true, errorStyle: 'stop', errorTitle: 'Select a void ratio',
+      error: 'Choose either 1.00 (open pit) or 0.30 (single-size stone).',
+    };
+    worksheet.getCell('C10').value = 'Strata description';
+    applyCellStyle(worksheet.getCell('C10'), { fill: BRAND.paleBlue, font: { name: 'Arial', size: 8, bold: true, color: { argb: BRAND.dark } } });
+    mergeValue(worksheet, 'D10:H10', session.strataDescription ? String(session.strataDescription) : null, {
+      fill: BRAND.white, font: { name: 'Arial', size: 8, color: { argb: BRAND.dark } },
+      alignment: { horizontal: 'left', vertical: 'middle', wrapText: false },
+    });
+    worksheet.getCell('I10').value = 'Pit details';
+    applyCellStyle(worksheet.getCell('I10'), { fill: BRAND.paleBlue, font: { name: 'Arial', size: 8, bold: true, color: { argb: BRAND.dark } } });
+    mergeValue(worksheet, 'J10:M10', session.pitDetails ? String(session.pitDetails) : null, {
+      fill: BRAND.white, font: { name: 'Arial', size: 8, color: { argb: BRAND.dark } },
+      alignment: { horizontal: 'left', vertical: 'middle', wrapText: false },
+    });
+    worksheet.getCell('A11').value = 'Stone fill depth (mm)';
+    applyCellStyle(worksheet.getCell('A11'), { fill: BRAND.paleBlue, font: { name: 'Arial', size: 8, bold: true, color: { argb: BRAND.dark } } });
+    worksheet.getCell('B11').value = asNumber(session.stoneFillDepth, asNumber(session.depthExcavation, 0));
+    applyCellStyle(worksheet.getCell('B11'), { fill: BRAND.white, alignment: { horizontal: 'center', vertical: 'middle' }, numFmt: '0' });
+    worksheet.getCell('B11').dataValidation = {
+      type: 'decimal', operator: 'between', allowBlank: true, formulae: [0, '$J$9'],
+      showInputMessage: true, promptTitle: 'Stone fill depth',
+      prompt: 'Depth of stone measured upward from the pit base.',
+      showErrorMessage: true, errorStyle: 'stop', errorTitle: 'Invalid stone depth',
+      error: 'Enter a value from 0 to the excavation depth in J9.',
+    };
+    worksheet.getRow(10).height = 20;
+    mergeValue(worksheet, 'C11:M11', 'One construction graphic is shared by all grouped runs. Its water level uses the first selected run.', {
+      fill: BRAND.paleBlue, font: { name: 'Arial', size: 8, italic: true, color: { argb: BRAND.dark } },
+      alignment: { horizontal: 'left', vertical: 'middle', wrapText: false },
+    });
+    worksheet.getRow(11).height = 20;
+
+    const graphBlocks = [[7, 13], [1, 6], [7, 13]];
+    mergeValue(worksheet, 'A12:F12', 'TEST PIT CONSTRUCTION', {
+      fill: BRAND.section,
+      font: { name: 'Arial', size: 10, bold: true, color: { argb: BRAND.white } },
+      alignment: { horizontal: 'center', vertical: 'middle' },
+    });
+    contexts.forEach((context, index) => {
+      const [startColumn, endColumn] = graphBlocks[index];
+      const headerRow = index === 0 ? 12 : 25;
+      mergeValue(worksheet, `${columnLetter(startColumn)}${headerRow}:${columnLetter(endColumn)}${headerRow}`, `${testLabels[index]} — HEAD OF WATER AGAINST TIME`, {
+        fill: BRAND.section,
+        font: { name: 'Arial', size: 8, bold: true, color: { argb: BRAND.white } },
+        alignment: { horizontal: 'center', vertical: 'middle' },
+      });
+    });
+    for (let row = 13; row <= 24; row += 1) worksheet.getRow(row).height = 18;
+    for (let row = 26; row <= 36; row += 1) worksheet.getRow(row).height = 17;
+    worksheet.getRow(37).height = 6;
+
+    const dimensionText = value => (Number.isFinite(value) ? `${Math.round(value)}mm` : '');
+    const chartLabels = {
+      topLength: dimensionText(asNumber(session.lengthTop, NaN)),
+      topWidth: dimensionText(asNumber(session.widthTop, NaN)),
+      excavationDepth: dimensionText(asNumber(session.depthExcavation, NaN)),
+      headOfWater: Number.isFinite(first.results.initialHead) ? `Head of water\n${Math.round(first.results.initialHead)}mm` : 'Head of water',
+      bottomWidth: dimensionText(asNumber(session.widthBottom || session.widthTop, NaN)),
+      bottomLength: dimensionText(asNumber(session.lengthBottom || session.lengthTop, NaN)),
+    };
+    const pitDimensions = {
+      lengthTop: asNumber(session.lengthTop, NaN),
+      lengthBottom: asNumber(session.lengthBottom || session.lengthTop, NaN),
+      widthTop: asNumber(session.widthTop, NaN),
+      widthBottom: asNumber(session.widthBottom || session.widthTop, NaN),
+      depthExcavation: asNumber(session.depthExcavation, NaN),
+      initialHead: first.results.initialHead,
+      voidRatio: asNumber(session.voidRatio, 1),
+      stoneDepth: asNumber(session.stoneFillDepth, asNumber(session.depthExcavation, 0)),
+    };
+    const groupedLabelCells = ['$AF$13', '$AF$14', '$AF$15', '$AF$16', '$AF$17', '$AF$18'];
+    const groupedLabelSources = [
+      [13, '=TEXT($B$9,"0")&"mm"', chartLabels.topLength],
+      [14, '=TEXT($F$9,"0")&"mm"', chartLabels.topWidth],
+      [15, '=TEXT($J$9,"0")&"mm"', chartLabels.excavationDepth],
+      [16, '="Head of water"&CHAR(10)&TEXT($L$9,"0")&"mm"', chartLabels.headOfWater],
+      [17, '=TEXT($H$9,"0")&"mm"', chartLabels.bottomWidth],
+      [18, '=TEXT($D$9,"0")&"mm"', chartLabels.bottomLength],
+    ];
+    groupedLabelSources.forEach(([row, formula, result]) => {
+      worksheet.getCell(`AE${row}`).value = `Pit label ${row - 12}`;
+      worksheet.getCell(`AF${row}`).value = formulaValue(formula, result);
+      worksheet.getCell(`AF${row}`).protection = { locked: true };
+    });
+    const pitChartSeries = buildPitChartModel(worksheet, name, pitDimensions, chartLabels, {
+      labelCells: groupedLabelCells,
+      stoneDepthCell: '$B$11',
+    });
+
+    const appendixHeadings = ['No.', 'Date', 'Clock time', 'Time (mins)', 'Depth to water (mm)', 'Head of water (mm)'];
+    const writeAppendixPoint = (context, pointIndex, rowNumber, startColumn) => {
+      const point = context.points[pointIndex];
+      const timestamp = point && point.timestamp ? new Date(point.timestamp) : null;
+      const depthAddress = worksheet.getCell(rowNumber, startColumn + 4).address;
+      const head = point ? context.results.excavation - point.depth : null;
+      const values = point ? [
+        pointIndex + 1,
+        timestamp || null,
+        timestamp || point.clockTime || null,
+        point.time,
+        point.depth,
+        formulaValue(`=IF(${depthAddress}="","",$J$9-${depthAddress})`, head),
+      ] : [null, null, null, null, null, null];
+      values.forEach((value, offset) => {
+        const cell = worksheet.getCell(rowNumber, startColumn + offset);
+        cell.value = value;
+        applyCellStyle(cell, {
+          fill: offset === 5 ? BRAND.paleBlue : BRAND.white,
+          font: { name: 'Arial', size: 8, color: { argb: BRAND.dark } },
+          alignment: { horizontal: 'center', vertical: 'middle', wrapText: true },
+          numFmt: offset === 1 ? 'dd/mm/yyyy' : offset === 2 && timestamp ? 'hh:mm:ss' : offset >= 3 ? '0.00' : undefined,
+        });
+        cell.protection = { locked: !point || offset === 0 || offset === 5 };
+      });
+      if (point) {
+        context.sources[pointIndex] = {
+          date: worksheet.getCell(rowNumber, startColumn + 1).address,
+          clock: worksheet.getCell(rowNumber, startColumn + 2).address,
+          time: worksheet.getCell(rowNumber, startColumn + 3).address,
+          depth: worksheet.getCell(rowNumber, startColumn + 4).address,
+          head: worksheet.getCell(rowNumber, startColumn + 5).address,
+        };
+      }
+    };
+
+    let appendixPageIndex = 0;
+    contexts.forEach(context => {
+      const pageCount = Math.max(1, Math.ceil(context.points.length / appendixPageCapacity));
+      for (let testPageIndex = 0; testPageIndex < pageCount; testPageIndex += 1) {
+        const startRow = appendixFirstRow + appendixPageIndex * appendixPageHeight;
+        const pointOffset = testPageIndex * appendixPageCapacity;
+        addLogo(startRow);
+        mergeValue(worksheet, `D${startRow}:M${startRow + 1}`, 'SOAKAWAY INFILTRATION TEST REPORT — COMPLETE RECORDED DATA', {
+          border: false,
+          font: { name: 'Arial', size: 14, bold: true, color: { argb: BRAND.navy } },
+          alignment: { horizontal: 'right', vertical: 'middle' },
+        });
+        mergeValue(worksheet, `D${startRow + 2}:M${startRow + 3}`, `${locationId} — ${testLabels[context.index]} — DATA PAGE ${testPageIndex + 1} OF ${pageCount}`, {
+          border: false,
+          font: { name: 'Arial', size: 11, bold: true, color: { argb: BRAND.blue } },
+          alignment: { horizontal: 'right', vertical: 'top' },
+        });
+        [startRow, startRow + 1].forEach(row => { worksheet.getRow(row).height = 27; });
+        [startRow + 2, startRow + 3].forEach(row => { worksheet.getRow(row).height = 20; });
+        mergeValue(worksheet, `A${startRow + 4}:M${startRow + 4}`, 'TEST DETAILS', {
+          fill: BRAND.section, font: { name: 'Arial', size: 10, bold: true, color: { argb: BRAND.white } },
+          alignment: { horizontal: 'center', vertical: 'middle' },
+        });
+        const contextDate = context.points.find(point => point.timestamp)?.timestamp;
+        const detailRows = [
+          [`A${startRow + 5}`, 'Location ID', `B${startRow + 5}:D${startRow + 5}`, locationId],
+          [`E${startRow + 5}`, 'Test Number', `F${startRow + 5}:G${startRow + 5}`, safeSheetText(context.session.testNumber)],
+          [`H${startRow + 5}`, 'Date of Test', `I${startRow + 5}:J${startRow + 5}`, contextDate ? new Date(contextDate) : ''],
+          [`K${startRow + 5}`, 'Logged By', `L${startRow + 5}:M${startRow + 5}`, formulaValue('=IF($M$6="","",$M$6)', '')],
+          [`A${startRow + 6}`, 'Site / Project', `B${startRow + 6}:G${startRow + 6}`, formulaValue('=IF($B$7="","",$B$7)', '')],
+          [`H${startRow + 6}`, 'Checked By', `I${startRow + 6}:M${startRow + 6}`, formulaValue('=IF($J$7="","",$J$7)', '')],
+        ];
+        detailRows.forEach(([labelCell, label, valueRange, value]) => {
+          worksheet.getCell(labelCell).value = label;
+          applyCellStyle(worksheet.getCell(labelCell), { fill: BRAND.paleBlue, font: { name: 'Arial', size: 8, bold: true, color: { argb: BRAND.dark } } });
+          const target = mergeValue(worksheet, valueRange, value, { fill: BRAND.white, font: { name: 'Arial', size: 9, color: { argb: BRAND.dark } } });
+          if (label === 'Date of Test') target.numFmt = 'dd/mm/yyyy';
+        });
+        worksheet.getRow(startRow + 5).height = 22;
+        worksheet.getRow(startRow + 6).height = 22;
+        mergeValue(worksheet, `A${startRow + 7}:M${startRow + 7}`, 'TEST PIT PARAMETERS', {
+          fill: BRAND.section, font: { name: 'Arial', size: 10, bold: true, color: { argb: BRAND.white } },
+          alignment: { horizontal: 'center', vertical: 'middle' },
+        });
+        const parameterRow = startRow + 8;
+        const linkedParameters = [
+          ['A', 'Length at top (mm)', 'B', '=$B$9', asNumber(session.lengthTop, null)],
+          ['C', 'Length at bottom (mm)', 'D', '=$D$9', asNumber(session.lengthBottom || session.lengthTop, null)],
+          ['E', 'Width at top (mm)', 'F', '=$F$9', asNumber(session.widthTop, null)],
+          ['G', 'Width at bottom (mm)', 'H', '=$H$9', asNumber(session.widthBottom || session.widthTop, null)],
+          ['I', 'Excavation depth (mm)', 'J', '=$J$9', asNumber(session.depthExcavation, null)],
+          ['K', 'Initial head (mm)', 'L', `=$${columnLetter(34 + context.index * 3 + 2)}$1`, context.results.initialHead],
+        ];
+        linkedParameters.forEach(([labelColumn, label, valueColumn, formula, result]) => {
+          worksheet.getCell(`${labelColumn}${parameterRow}`).value = label;
+          applyCellStyle(worksheet.getCell(`${labelColumn}${parameterRow}`), { fill: BRAND.paleBlue, font: { name: 'Arial', size: 8, bold: true, color: { argb: BRAND.dark } } });
+          worksheet.getCell(`${valueColumn}${parameterRow}`).value = formulaValue(formula, result);
+          applyCellStyle(worksheet.getCell(`${valueColumn}${parameterRow}`), { fill: BRAND.white, alignment: { horizontal: 'center', vertical: 'middle' }, numFmt: '0.00' });
+        });
+        worksheet.getCell(`M${parameterRow}`).value = 'mm';
+        applyCellStyle(worksheet.getCell(`M${parameterRow}`), { fill: BRAND.paleBlue, alignment: { horizontal: 'center', vertical: 'middle' } });
+        worksheet.getRow(parameterRow).height = 30;
+        const parameterSecondRow = startRow + 9;
+        worksheet.getCell(`A${parameterSecondRow}`).value = 'Void ratio';
+        applyCellStyle(worksheet.getCell(`A${parameterSecondRow}`), { fill: BRAND.paleBlue, font: { name: 'Arial', size: 8, bold: true, color: { argb: BRAND.dark } } });
+        worksheet.getCell(`B${parameterSecondRow}`).value = formulaValue('=$B$10', asNumber(session.voidRatio, 1));
+        applyCellStyle(worksheet.getCell(`B${parameterSecondRow}`), { fill: BRAND.white, alignment: { horizontal: 'center', vertical: 'middle' }, numFmt: '0.00' });
+        worksheet.getCell(`C${parameterSecondRow}`).value = 'Strata description';
+        applyCellStyle(worksheet.getCell(`C${parameterSecondRow}`), { fill: BRAND.paleBlue, font: { name: 'Arial', size: 8, bold: true, color: { argb: BRAND.dark } } });
+        mergeValue(worksheet, `D${parameterSecondRow}:H${parameterSecondRow}`, formulaValue('=IF($D$10="","",$D$10)', session.strataDescription || ''), { fill: BRAND.white, font: { name: 'Arial', size: 8, color: { argb: BRAND.dark } }, alignment: { horizontal: 'left', vertical: 'middle' } });
+        worksheet.getCell(`I${parameterSecondRow}`).value = 'Pit details';
+        applyCellStyle(worksheet.getCell(`I${parameterSecondRow}`), { fill: BRAND.paleBlue, font: { name: 'Arial', size: 8, bold: true, color: { argb: BRAND.dark } } });
+        mergeValue(worksheet, `J${parameterSecondRow}:M${parameterSecondRow}`, formulaValue('=IF($J$10="","",$J$10)', session.pitDetails || ''), { fill: BRAND.white, font: { name: 'Arial', size: 8, color: { argb: BRAND.dark } }, alignment: { horizontal: 'left', vertical: 'middle' } });
+        worksheet.getRow(parameterSecondRow).height = 20;
+        worksheet.getRow(startRow + 10).height = 6;
+        mergeValue(worksheet, `A${startRow + 11}:M${startRow + 11}`, `${testLabels[context.index]} — COMPLETE SITE RECORDED DATA — ${context.points.length} READINGS`, {
+          fill: BRAND.section, font: { name: 'Arial', size: 10, bold: true, color: { argb: BRAND.white } },
+          alignment: { horizontal: 'center', vertical: 'middle' },
+        });
+        [1, 8].forEach(startColumn => appendixHeadings.forEach((heading, offset) => {
+          const cell = worksheet.getCell(startRow + 12, startColumn + offset);
+          cell.value = heading;
+          applyCellStyle(cell, { fill: BRAND.section, font: { name: 'Arial', size: 7, bold: true, color: { argb: BRAND.white } }, alignment: { horizontal: 'center', vertical: 'middle', wrapText: true } });
+        }));
+        worksheet.getCell(startRow + 12, 7).fill = fill(BRAND.white);
+        worksheet.getCell(startRow + 12, 7).border = {};
+        worksheet.getRow(startRow + 12).height = 30;
+        for (let localIndex = 0; localIndex < 42; localIndex += 1) {
+          const rowNumber = startRow + 13 + localIndex;
+          writeAppendixPoint(context, pointOffset + localIndex, rowNumber, 1);
+          writeAppendixPoint(context, pointOffset + 42 + localIndex, rowNumber, 8);
+          worksheet.getCell(rowNumber, 7).fill = fill(BRAND.white);
+          worksheet.getCell(rowNumber, 7).border = {};
+          worksheet.getRow(rowNumber).height = 15;
+        }
+        appendixPageIndex += 1;
+      }
+    });
+    for (let pageIndex = 0; pageIndex < totalAppendixPages; pageIndex += 1) {
+      worksheet.getRow(56 + pageIndex * appendixPageHeight).addPageBreak();
+    }
+    worksheet.getRow(56).height = 6;
+
+    const drainageArtifacts = [];
+    const manualInputRanges = [];
+    const analysisBlocks = [
+      { start: 1, labelEnd: 2, valueStart: 3, valueEnd: 4 },
+      { start: 5, labelEnd: 6, valueStart: 7, valueEnd: 8 },
+      { start: 9, labelEnd: 11, valueStart: 12, valueEnd: 13 },
+    ];
+    contexts.forEach((context, index) => {
+      const helperStartColumn = 34 + index * 3;
+      const timeColumn = columnLetter(helperStartColumn);
+      const depthColumn = columnLetter(helperStartColumn + 1);
+      const headColumn = columnLetter(helperStartColumn + 2);
+      [helperStartColumn, helperStartColumn + 1, helperStartColumn + 2].forEach(column => { worksheet.getColumn(column).hidden = true; });
+      context.points.forEach((point, pointIndex) => {
+        const helperRow = pointIndex + 1;
+        const source = context.sources[pointIndex];
+        const head = context.results.excavation - point.depth;
+        worksheet.getCell(`${timeColumn}${helperRow}`).value = formulaValue(`=${source.time}`, point.time);
+        worksheet.getCell(`${depthColumn}${helperRow}`).value = formulaValue(`=${source.depth}`, point.depth);
+        worksheet.getCell(`${headColumn}${helperRow}`).value = formulaValue(`=${source.head}`, head);
+        [timeColumn, depthColumn, headColumn].forEach(column => {
+          worksheet.getCell(`${column}${helperRow}`).numFmt = '0.00';
+          worksheet.getCell(`${column}${helperRow}`).protection = { locked: true };
+        });
+      });
+      if (!context.points.length) [timeColumn, depthColumn, headColumn].forEach(column => {
+        worksheet.getCell(`${column}1`).value = null;
+        worksheet.getCell(`${column}1`).protection = { locked: true };
+      });
+      const sourceLastRow = Math.max(context.points.length, 1);
+      const cross75Column = columnLetter(44 + index * 2);
+      const cross25Column = columnLetter(45 + index * 2);
+      worksheet.getColumn(44 + index * 2).hidden = true;
+      worksheet.getColumn(45 + index * 2).hidden = true;
+      for (let pointIndex = 1; pointIndex < sourceLastRow; pointIndex += 1) {
+        const row = pointIndex + 1;
+        const previousHead = context.results.excavation - context.points[pointIndex - 1].depth;
+        const currentHead = context.results.excavation - context.points[pointIndex].depth;
+        const cross75 = previousHead >= context.results.level75 && currentHead <= context.results.level75
+          ? context.points[pointIndex - 1].time + ((previousHead - context.results.level75) * (context.points[pointIndex].time - context.points[pointIndex - 1].time)) / (previousHead - currentHead || 1)
+          : null;
+        const cross25 = previousHead >= context.results.level25 && currentHead <= context.results.level25
+          ? context.points[pointIndex - 1].time + ((previousHead - context.results.level25) * (context.points[pointIndex].time - context.points[pointIndex - 1].time)) / (previousHead - currentHead || 1)
+          : null;
+        const level75ValueCell = `${columnLetter(analysisBlocks[index].valueStart)}41`;
+        const level25ValueCell = `${columnLetter(analysisBlocks[index].valueStart)}42`;
+        worksheet.getCell(`${cross75Column}${row}`).value = formulaValue(`=IF(AND($${headColumn}$${row - 1}>=${level75ValueCell},$${headColumn}$${row}<=${level75ValueCell},$${headColumn}$${row - 1}<>$${headColumn}$${row}),$${timeColumn}$${row - 1}+($${headColumn}$${row - 1}-${level75ValueCell})*($${timeColumn}$${row}-$${timeColumn}$${row - 1})/($${headColumn}$${row - 1}-$${headColumn}$${row}),"")`, cross75);
+        worksheet.getCell(`${cross25Column}${row}`).value = formulaValue(`=IF(AND($${headColumn}$${row - 1}>=${level25ValueCell},$${headColumn}$${row}<=${level25ValueCell},$${headColumn}$${row - 1}<>$${headColumn}$${row}),$${timeColumn}$${row - 1}+($${headColumn}$${row - 1}-${level25ValueCell})*($${timeColumn}$${row}-$${timeColumn}$${row - 1})/($${headColumn}$${row - 1}-$${headColumn}$${row}),"")`, cross25);
+      }
+
+      const block = analysisBlocks[index];
+      const labelStart = columnLetter(block.start);
+      const labelEnd = columnLetter(block.labelEnd);
+      const valueStart = columnLetter(block.valueStart);
+      const valueEnd = columnLetter(block.valueEnd);
+      const manualRateRequired = requiresManualInfiltrationRate(context.points, context.results);
+      const selectedWaterLevel1 = `${valueStart}${manualRateRequired ? 43 : 41}`;
+      const selectedWaterLevel2 = `${valueStart}${manualRateRequired ? 44 : 42}`;
+      const manualVolumeDischargedFormula = `=IF(OR(${valueStart}43="",${valueStart}44=""),"",AVERAGE($B$9*$F$9,$D$9*$H$9)/1000000*ABS(${valueStart}43-${valueStart}44)/1000*$B$10)`;
+      if (manualRateRequired) manualInputRanges.push(`${valueStart}43:${valueEnd}45`);
+      mergeValue(worksheet, `${labelStart}38:${valueEnd}38`, `BRE 365 DATA ANALYSIS — ${testLabels[index]}`, {
+        fill: BRAND.section, font: { name: 'Arial', size: 8, bold: true, color: { argb: BRAND.white } },
+        alignment: { horizontal: 'center', vertical: 'middle' },
+      });
+      const initialFormula = `=IFERROR($J$9-$${depthColumn}$1,"")`;
+      const rows = [
+        [39, 'Initial head (mm)', initialFormula, context.results.initialHead, '0.00'],
+        [40, 'Minimum head (mm)', `=IF(COUNT($${headColumn}$1:$${headColumn}$${sourceLastRow})=0,"",MIN($${headColumn}$1:$${headColumn}$${sourceLastRow}))`, context.results.minimumHead, '0.00'],
+        [41, '75% water level (mm)', `=${valueStart}39*0.75`, context.results.level75, '0.00'],
+        [42, '25% water level (mm)', `=${valueStart}39*0.25`, context.results.level25, '0.00'],
+        [43, manualRateRequired ? 'User chosen Water Level 1 (mm)' : 'Time at 75% (mins)', manualRateRequired ? null : `=IF(COUNT($${cross75Column}$1:$${cross75Column}$${sourceLastRow})=0,"",MAX($${cross75Column}$1:$${cross75Column}$${sourceLastRow}))`, manualRateRequired ? null : context.results.time75, '0.00', manualRateRequired],
+        [44, manualRateRequired ? 'User chosen Water Level 2 (mm)' : 'Time at 25% (mins)', manualRateRequired ? null : `=IF(COUNT($${cross25Column}$1:$${cross25Column}$${sourceLastRow})=0,"",MAX($${cross25Column}$1:$${cross25Column}$${sourceLastRow}))`, manualRateRequired ? null : context.results.time25, '0.00', manualRateRequired],
+        [45, manualRateRequired ? 'Time to drain from Water Level 1 to 2 (mins)' : 'Drain time (mins)', manualRateRequired ? null : `=IF(OR(${valueStart}43="",${valueStart}44=""),"",${valueStart}44-${valueStart}43)`, manualRateRequired ? null : context.results.drainTime, '0.00', manualRateRequired],
+        [46, 'Factored volume (m³)', `=AVERAGE($B$9*$F$9,$D$9*$H$9)/1000000*${valueStart}39/1000*$B$10`, context.results.factoredVolume, '0.000000'],
+        [47, 'Water discharged (m³)', manualRateRequired ? manualVolumeDischargedFormula : `=${valueStart}46*0.5`, manualRateRequired ? null : context.results.volumeDischarged, '0.000000'],
+        [48, 'Discharge area (m²)', manualRateRequired
+          ? `=IF(OR(${selectedWaterLevel1}="",${selectedWaterLevel2}=""),"",((2*AVERAGE($B$9,$D$9)+2*AVERAGE($F$9,$H$9))/1000)*AVERAGE(${selectedWaterLevel1},${selectedWaterLevel2})/1000+($D$9*$H$9/1000000))`
+          : `=((2*AVERAGE($B$9,$D$9)+2*AVERAGE($F$9,$H$9))/1000)*AVERAGE(${selectedWaterLevel1},${selectedWaterLevel2})/1000+($D$9*$H$9/1000000)`, manualRateRequired ? null : context.results.dischargeArea, '0.000000'],
+        [50, 'Infiltration rate (m/min)', `=IFERROR(${valueStart}47/${valueStart}48/${valueStart}45,"")`, manualRateRequired ? null : context.results.infiltrationMMin, '0.000E+00'],
+        [51, 'Infiltration rate (m/sec)', `=IF(${valueStart}50="","",${valueStart}50/60)`, manualRateRequired ? null : context.results.infiltrationMSec, '0.000E+00'],
+      ];
+      rows.forEach(([row, label, formula, result, format, isManualInput = false]) => {
+        const highlight = row >= 50;
+        mergeValue(worksheet, `${labelStart}${row}:${labelEnd}${row}`, label, {
+          fill: highlight ? BRAND.navy : BRAND.paleBlue,
+          font: { name: 'Arial', size: 7, bold: true, color: { argb: highlight ? BRAND.white : BRAND.dark } },
+          alignment: { horizontal: 'left', vertical: 'middle', wrapText: true },
+        });
+        mergeValue(worksheet, `${valueStart}${row}:${valueEnd}${row}`, formula ? formulaValue(formula, result) : null, {
+          fill: isManualInput ? BRAND.manualInput : highlight ? BRAND.paleGreen : BRAND.white,
+          font: { name: 'Arial', size: highlight ? 9 : 8, bold: highlight, color: { argb: BRAND.dark } },
+          alignment: { horizontal: 'right', vertical: 'middle' }, numFmt: format,
+        });
+      });
+      mergeValue(worksheet, `${labelStart}53:${labelEnd}54`, 'BRE 365 COMPLIANCE', {
+        fill: BRAND.section, font: { name: 'Arial', size: 7, bold: true, color: { argb: BRAND.white } },
+        alignment: { horizontal: 'center', vertical: 'middle', wrapText: true },
+      });
+      const complianceFormula = `=IF(COUNT($${headColumn}$1:$${headColumn}$${sourceLastRow})=0,"No readings recorded",IF(${valueStart}40<=${valueStart}42,"Compliant with BRE 365","Not compliant - test did not drain past 25% effective depth"))`;
+      mergeValue(worksheet, `${valueStart}53:${valueEnd}54`, formulaValue(complianceFormula, context.results.compliance), {
+        fill: context.results.compliance.startsWith('Compliant') ? BRAND.paleGreen : BRAND.paleRed,
+        font: { name: 'Arial', size: 7, bold: true, color: { argb: BRAND.dark } },
+        alignment: { horizontal: 'center', vertical: 'middle', wrapText: true },
+      });
+
+      const thresholdRow = 13 + index * 3;
+      const chartTimes = context.points.map(point => point.time);
+      const chartMinTime = chartTimes.length ? Math.min(...chartTimes) : 0;
+      const chartMaxTime = chartTimes.length ? Math.max(...chartTimes) : 1;
+      worksheet.getCell(`S${thresholdRow}`).value = formulaValue(`=IF(COUNT($${timeColumn}$1:$${timeColumn}$${sourceLastRow})=0,0,MIN($${timeColumn}$1:$${timeColumn}$${sourceLastRow}))`, chartMinTime);
+      worksheet.getCell(`S${thresholdRow + 1}`).value = formulaValue(`=IF(COUNT($${timeColumn}$1:$${timeColumn}$${sourceLastRow})=0,1,MAX($${timeColumn}$1:$${timeColumn}$${sourceLastRow}))`, chartMaxTime);
+      worksheet.getCell(`T${thresholdRow}`).value = formulaValue(`=${valueStart}41`, context.results.level75);
+      worksheet.getCell(`T${thresholdRow + 1}`).value = formulaValue(`=${valueStart}41`, context.results.level75);
+      worksheet.getCell(`U${thresholdRow}`).value = formulaValue(`=${valueStart}42`, context.results.level25);
+      worksheet.getCell(`U${thresholdRow + 1}`).value = formulaValue(`=${valueStart}42`, context.results.level25);
+      const bandColumns = [['V', 'W'], ['X', 'Y'], ['Z', 'AA']][index];
+      const drainageBand = { startRow: 10000, endRow: 10000, xValues: [], yValues: [], xRange: '', yRange: '' };
+      let bandRow = drainageBand.startRow;
+      for (let stripe = 0; stripe < 128; stripe += 1) {
+        const ratio = stripe / 127;
+        const xValue = chartMinTime + (chartMaxTime - chartMinTime) * ratio;
+        const xFormula = `=$S$${thresholdRow}+($S$${thresholdRow + 1}-$S$${thresholdRow})*${ratio}`;
+        [[xFormula, `=$U$${thresholdRow}`, xValue, context.results.level25], [xFormula, `=$T$${thresholdRow}`, xValue, context.results.level75], ['=NA()', '=NA()', NaN, NaN]].forEach(([xFormulaText, yFormulaText, xResult, yResult]) => {
+          worksheet.getCell(`${bandColumns[0]}${bandRow}`).value = formulaValue(xFormulaText, xResult);
+          worksheet.getCell(`${bandColumns[1]}${bandRow}`).value = formulaValue(yFormulaText, yResult);
+          drainageBand.xValues.push(xResult);
+          drainageBand.yValues.push(yResult);
+          bandRow += 1;
+        });
+      }
+      drainageBand.endRow = bandRow - 1;
+      drainageBand.xRange = `$${bandColumns[0]}$${drainageBand.startRow}:$${bandColumns[0]}$${drainageBand.endRow}`;
+      drainageBand.yRange = `$${bandColumns[1]}$${drainageBand.startRow}:$${bandColumns[1]}$${drainageBand.endRow}`;
+      drainageArtifacts.push({
+        name, points: context.points, results: context.results, firstDataRow: 1, lastDataRow: sourceLastRow,
+        chartTimeRange: `$${timeColumn}$1:$${timeColumn}$${sourceLastRow}`,
+        chartHeadRange: `$${headColumn}$1:$${headColumn}$${sourceLastRow}`,
+        thresholdTimeRange: `$S$${thresholdRow}:$S$${thresholdRow + 1}`,
+        threshold75Range: `$T$${thresholdRow}:$T$${thresholdRow + 1}`,
+        threshold25Range: `$U$${thresholdRow}:$U$${thresholdRow + 1}`,
+        drainageBand,
+      });
+    });
+    worksheet.getRow(38).height = 20;
+    for (let row = 39; row <= 54; row += 1) worksheet.getRow(row).height = row === 49 || row === 52 ? 7 : 17;
+    if (manualInputRanges.length) worksheet.getRow(45).height = 24;
+
+    const setLocked = (address, locked) => {
+      const [start, end = start] = address.split(':');
+      const startCell = worksheet.getCell(start);
+      const endCell = worksheet.getCell(end);
+      for (let row = startCell.row; row <= endCell.row; row += 1) {
+        for (let column = startCell.col; column <= endCell.col; column += 1) worksheet.getCell(row, column).protection = { locked };
+      }
+    };
+    ['M6', 'B7:H7', 'J7:M7', 'B9', 'D9', 'F9', 'H9', 'J9', 'B10', 'D10:H10', 'J10:M10', 'B11'].forEach(address => setLocked(address, false));
+    manualInputRanges.forEach(address => setLocked(address, false));
+    await worksheet.protect('', {
+      spinCount: 1000, selectLockedCells: true, selectUnlockedCells: true,
+      autoFilter: true, objects: false, scenarios: true,
+    });
+    worksheet.views = [{ showGridLines: false, zoomScale: 78 }];
+    const pitArtifact = { name, chartLabels, pitDimensions, pitChartSeries };
+    const nativeCharts = [
+      { kind: 'pit', name: 'Shared test pit construction', artifact: pitArtifact, fromColumn: 0, fromRow: 12, toColumn: 6, toRow: 24 },
+      { kind: 'drainage', name: `${testLabels[0]} head of water against time`, artifact: drainageArtifacts[0], fromColumn: 6, fromRow: 12, toColumn: 13, toRow: 24 },
+      { kind: 'drainage', name: `${testLabels[1]} head of water against time`, artifact: drainageArtifacts[1], fromColumn: 0, fromRow: 25, toColumn: 6, toRow: 36 },
+      ...(drainageArtifacts[2] ? [{ kind: 'drainage', name: `${testLabels[2]} head of water against time`, artifact: drainageArtifacts[2], fromColumn: 6, fromRow: 25, toColumn: 13, toRow: 36 }] : []),
+    ];
+    return {
+      worksheet, name, sessions, contexts, footerRow, pitArtifact, drainageArtifacts, nativeCharts,
+      grouped: true, appendixPageCount: totalAppendixPages,
+    };
   }
 
   function downloadBuffer(buffer, filename) {
@@ -1469,7 +2325,7 @@
     setTimeout(() => URL.revokeObjectURL(url), 1500);
   }
 
-  async function buildWorkbook(rawSessions) {
+  async function buildWorkbook(rawSessions, options = {}) {
     if (!window.ExcelJS) throw new Error('Excel report library did not load. Reload the app and try again.');
     const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
     const sessions = rawSessions.filter(hasReportData).sort((left, right) => {
@@ -1486,16 +2342,23 @@
     workbook.calcProperties.fullCalcOnLoad = true;
     workbook.calcProperties.forceFullCalc = true;
     const logoBase64 = await loadReportLogoBase64();
-    const names = buildSheetNames(sessions);
+    const grouped = Boolean(options.groupSameLocation);
+    const names = grouped
+      ? [`${groupedLocationId(sessions)} - Grouped Tests`.slice(0, 31)]
+      : buildSheetNames(sessions);
     const artifacts = [];
-    for (let index = 0; index < sessions.length; index += 1) {
-      artifacts.push(await buildWorksheet(workbook, sessions[index], names[index], logoBase64));
+    if (grouped) {
+      artifacts.push(await buildGroupedWorksheet(workbook, sessions, names[0], logoBase64));
+    } else {
+      for (let index = 0; index < sessions.length; index += 1) {
+        artifacts.push(await buildWorksheet(workbook, sessions[index], names[index], logoBase64));
+      }
     }
-    return { workbook, sessions, names, artifacts };
+    return { workbook, sessions, names, artifacts, grouped };
   }
 
-  async function buildAndDownload(rawSessions) {
-    const { workbook, sessions, artifacts } = await buildWorkbook(rawSessions);
+  async function buildAndDownload(rawSessions, options = {}) {
+    const { workbook, sessions, artifacts } = await buildWorkbook(rawSessions, options);
     const excelJsBuffer = await workbook.xlsx.writeBuffer();
     const buffer = await addNativeChartsToBuffer(excelJsBuffer, artifacts);
     const locations = [...new Set(sessions.map(session => safeSheetText(session.locationId)).filter(Boolean))];
@@ -1511,6 +2374,6 @@
   window.DepthLoggerExcel = {
     buildAndDownload,
     buildWorkbook,
-    _test: { buildSheetNames, calculateResults, normalizePoints, crossingTime, hasReportData, columnLetter },
+    _test: { buildSheetNames, calculateResults, normalizePoints, crossingTime, requiresManualInfiltrationRate, hasReportData, columnLetter, groupedLocationId },
   };
 })();

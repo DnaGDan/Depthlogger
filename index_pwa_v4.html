@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Brownfield Solutions Soakaway Logger - v4.17.0</title>
+  <title>Brownfield Solutions Soakaway Logger - v4.21.2</title>
   <link rel="manifest" href="./manifest.json" />
   <link rel="apple-touch-icon" href="./icon-192.png" />
   <link rel="icon" href="./icon-192.png" />
@@ -167,6 +167,7 @@
       filter: none;
       opacity: 1;
     }
+    button:disabled:hover { background: #94a3b8; }
 
     /* Secondary, ghost & danger styles for semantic clarity */
     .btn-ghost {
@@ -256,6 +257,37 @@
 
     /* Microcopy */
     .hint { margin: 6px 0 0; font-size: 0.925rem; color: var(--muted); }
+    .session-create-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .session-duplicate-hint {
+      flex: 1 1 150px;
+      margin: 0;
+      font-size: 0.82rem;
+      color: var(--muted);
+    }
+    .session-tab {
+      touch-action: manipulation;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    .session-tab.is-long-pressing {
+      box-shadow: inset 0 0 0 2px var(--focus-ring);
+      background: rgba(127, 146, 190, 0.16);
+    }
+    .duplicate-notice {
+      margin: 8px 0 0;
+      padding: 8px 10px;
+      border: 1px solid var(--focus-ring);
+      border-radius: 9px;
+      background: color-mix(in srgb, var(--focus-ring) 12%, transparent);
+      color: var(--fg);
+      font-size: 0.86rem;
+      font-weight: 600;
+    }
 
     /* ---------- Export session picker ---------- */
     .export-dialog {
@@ -319,6 +351,26 @@
       font-weight: 700;
       vertical-align: 1px;
     }
+    .export-group-choice {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr);
+      gap: 11px;
+      align-items: start;
+      margin-top: 16px;
+      padding: 12px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: color-mix(in srgb, var(--accent) 8%, var(--input-bg));
+    }
+    .export-group-choice input {
+      width: 20px;
+      height: 20px;
+      margin: 1px 0 0;
+      accent-color: var(--accent);
+    }
+    .export-group-choice:has(input:disabled) { opacity: 0.58; }
+    .export-group-choice__title { display: block; font-weight: 700; }
+    .export-group-choice__help { display: block; margin-top: 3px; color: var(--muted); font-size: 0.875rem; }
     .export-dialog__error { margin: 12px 0 0; color: #fca5a5; font-weight: 650; }
     .export-dialog__footer { justify-content: flex-end; border-top: 1px solid var(--border); }
   </style>
@@ -380,8 +432,9 @@
       <div style="flex:1"></div>
     </div>
     <p class="muted" style="margin-top:6px;">Manage running tests. Click a session to activate it.</p>
-    <div style="margin-top:8px;">
+    <div class="session-create-row" style="margin-top:8px;">
       <button id="newTestBtn" class="btn-ghost" title="Create new test">＋ New Test</button>
+      <p class="session-duplicate-hint">Long-press a session below to duplicate its test parameters into the next run. Recorded water-depth data is not copied.</p>
     </div>
     <ul id="sessionsList" style="margin-top:10px; list-style:none; padding:0;"></ul>
   </div>
@@ -392,6 +445,7 @@
       <button id="parametersClose" class="btn-ghost">Close</button>
     </div>
     <p class="muted" style="margin-top: 6px;">All dimensions in millimetres (mm). Bottom mirrors Top until edited.</p>
+    <p id="duplicateNotice" class="duplicate-notice" role="status" hidden></p>
 
     <div class="stack" style="margin-top: 10px;">
       <div class="grid-2">
@@ -437,6 +491,7 @@
     <div class="row" style="flex-wrap: wrap; gap: 8px; margin-top: 10px;">
       <button id="startPauseBtn" disabled>Start</button>
       <button id="stopTimer" disabled class="btn-danger">Stop</button>
+      <button id="rerunTest" disabled class="btn-ghost" title="Available after the current test has ended">↻ Re-run test</button>
       <button id="clearCurrent" class="btn-ghost">Clear Current Test</button>
     </div>
     <p class="hint">Timer rounds to the nearest second. Times are exported as decimal minutes (2 dp).</p>
@@ -507,8 +562,15 @@
         <button id="exportSessionsClose" class="btn-ghost export-dialog__close" type="button" aria-label="Close export dialog">Close</button>
       </div>
       <div class="export-dialog__body">
-        <p class="muted">Each selected session will be added as a separate worksheet in the Excel report.</p>
+        <p class="muted">By default, each selected session becomes a separate worksheet. Runs sharing one Location ID can instead use the grouped layout below.</p>
         <div id="exportSessionsList" class="export-session-list"></div>
+        <label class="export-group-choice">
+          <input id="exportGroupSameLocation" type="checkbox" disabled />
+          <span>
+            <span class="export-group-choice__title">Group runs from the same Location ID</span>
+            <span id="exportGroupSameLocationHelp" class="export-group-choice__help">Select two or three sessions with the same Location ID to enable this layout.</span>
+          </span>
+        </label>
         <p id="exportSessionsError" class="export-dialog__error" role="alert" hidden>Select at least one session to export.</p>
       </div>
       <div class="export-dialog__footer">
@@ -522,12 +584,12 @@
  
   <!-- App base: version + install status (moved from header) -->
   <div style="text-align:center; margin-top:8px;">
-    <span id="appVersionBadge" class="version-badge" aria-hidden="true" title="App version">v4.17.0</span>
+    <span id="appVersionBadge" class="version-badge" aria-hidden="true" title="App version">v4.21.2</span>
     <span id="installStatus" class="version-badge" aria-hidden="true" title="Install status">Not installed</span>
     <button id="appUpdateButton" class="version-badge update-badge" type="button" hidden>Update ready - reload</button>
   </div>
 
-  <p class="hint">Choose which sessions to include in each Excel report; every selected test gets its own worksheet. Speech input works best in Chrome (desktop/mobile).</p>
+  <p class="hint">Choose sessions individually or group up to three runs from the same Location ID into one report worksheet. Speech input works best in Chrome (desktop/mobile).</p>
 
   <style>
     /* ---------- Add your Quartile Progress Bar CSS below ---------- */
@@ -602,12 +664,12 @@
 
   <script src="./exceljs.min.js"></script>
   <script src="./jszip.min.js"></script>
-  <script src="./brownfield-logo-data.js?v=4.17.0"></script>
-  <script src="./excel-report-v4.js?v=4.17.0"></script>
+  <script src="./brownfield-logo-data.js?v=4.21.2"></script>
+  <script src="./excel-report-v4.js?v=4.21.2"></script>
   <script>
     'use strict';
 
-    const APP_VERSION = 'v4.17.0';
+    const APP_VERSION = 'v4.21.2';
     const SERVICE_WORKER_VERSION = APP_VERSION.replace(/^v/, '');
 
     function showAppUpdateReady() {
@@ -635,7 +697,8 @@
     let activeSessionId = null;
 
     function createNewSession(fromData = null) {
-      const id = Date.now().toString();
+      let id = Date.now().toString();
+      while (sessions[id]) id = String(Number(id) + 1);
       const base = {
         id,
         locationId: '',
@@ -657,6 +720,7 @@
         isPaused: false,
         testStarted: false,
         hasEverStarted: false,
+        testEnded: false,
         currentTestId: null // persisted saved-test id if any
       };
       sessions[id] = fromData ? { ...base, ...fromData, id } : base;
@@ -674,7 +738,13 @@
     function loadPersistedSessions() {
       const arr = JSON.parse(localStorage.getItem(CURRENT_KEY) || 'null');
       if (Array.isArray(arr) && arr.length) {
-        arr.forEach(s => sessions[s.id] = s);
+        arr.forEach(s => {
+          if (typeof s.testEnded !== 'boolean') {
+            const hasReadings = Array.isArray(s.points) && s.points.length > 0;
+            s.testEnded = Boolean(hasReadings && !s.testStarted && !s.hasEverStarted);
+          }
+          sessions[s.id] = s;
+        });
         // activate first session by default
         activateSession(arr[0].id);
       } else {
@@ -708,6 +778,7 @@
       s.isPaused = isPaused;
       s.testStarted = testStarted;
       s.hasEverStarted = hasEverStarted;
+      s.testEnded = testEnded;
       s.currentTestId = currentTestId;
       sessions[id] = s;
       persistSessions();
@@ -799,6 +870,7 @@
       isPaused = !!s.isPaused;
       testStarted = !!s.testStarted;
       hasEverStarted = !!s.hasEverStarted;
+      testEnded = !!s.testEnded;
       currentTestId = s.currentTestId || null;
 
       // populate form fields
@@ -852,6 +924,116 @@
       }
     }
 
+    const DUPLICATED_SESSION_PARAMETER_FIELDS = [
+      'locationId',
+      'lengthTop',
+      'lengthBottom',
+      'widthTop',
+      'widthBottom',
+      'depthExcavation',
+      'voidRatio',
+      'strataDescription',
+      'pitDetails',
+      'stoneFillDepth',
+      'projectNumber',
+      'projectName',
+      'siteName',
+      'testedBy',
+      'checkedBy',
+    ];
+
+    function sessionDisplayLabel(session) {
+      if (!session) return 'session';
+      const location = String(session.locationId || '').trim() || 'New';
+      const test = String(session.testNumber || '').trim();
+      return test ? `${location} — ${test}` : location;
+    }
+
+    function incrementTestNumberLabel(value) {
+      const text = String(value || '').trim();
+      if (!text) return '1';
+      const match = text.match(/^(.*?)(\d+)(\s*)$/);
+      if (!match) return `${text} 2`;
+      const nextNumber = String(Number(match[2]) + 1).padStart(match[2].length, '0');
+      return `${match[1]}${nextNumber}${match[3]}`;
+    }
+
+    function nextTestNumberForSession(sourceSession) {
+      const locationKey = String(sourceSession.locationId || '').trim().toLocaleLowerCase();
+      const used = new Set(
+        Object.values(sessions)
+          .filter(session => String(session.locationId || '').trim().toLocaleLowerCase() === locationKey)
+          .map(session => String(session.testNumber || '').trim().toLocaleLowerCase())
+          .filter(Boolean)
+      );
+      let candidate = incrementTestNumberLabel(sourceSession.testNumber);
+      for (let attempt = 0; attempt < 1000 && used.has(candidate.toLocaleLowerCase()); attempt += 1) {
+        candidate = incrementTestNumberLabel(candidate);
+      }
+      return candidate;
+    }
+
+    function closeSessionsPanel() {
+      const panel = document.getElementById('sessions');
+      if (!panel) return;
+      panel.classList.remove('open');
+      panel.setAttribute('aria-hidden', 'true');
+      document.body.classList.remove('sessions-open');
+    }
+
+    function openParametersForEditing(focusId) {
+      closeSessionsPanel();
+      const params = document.getElementById('parameters');
+      if (params) {
+        params.classList.add('open');
+        params.setAttribute('aria-hidden', 'false');
+        document.body.classList.add('panel-open');
+      }
+      requestAnimationFrame(() => {
+        const field = document.getElementById(focusId);
+        if (!field) return;
+        field.focus();
+        if (typeof field.select === 'function') field.select();
+      });
+    }
+
+    function hideDuplicateNotice() {
+      const notice = document.getElementById('duplicateNotice');
+      if (notice) notice.hidden = true;
+    }
+
+    function duplicateSessionParameters(sourceId) {
+      if (activeSessionId === sourceId) saveGlobalsToSession(sourceId);
+      const source = sessions[sourceId];
+      if (!source) return null;
+
+      const duplicate = {};
+      DUPLICATED_SESSION_PARAMETER_FIELDS.forEach(field => {
+        if (Object.prototype.hasOwnProperty.call(source, field)) duplicate[field] = source[field];
+      });
+      duplicate.testNumber = nextTestNumberForSession(source);
+      duplicate.depthTested = '';
+      duplicate.points = [];
+      duplicate.startTime = undefined;
+      duplicate.pausedTime = 0;
+      duplicate.pauseStart = undefined;
+      duplicate.isPaused = false;
+      duplicate.testStarted = false;
+      duplicate.hasEverStarted = false;
+      duplicate.testEnded = false;
+      duplicate.currentTestId = null;
+
+      const sourceLabel = sessionDisplayLabel(source);
+      const id = createNewSession(duplicate);
+      const notice = document.getElementById('duplicateNotice');
+      if (notice) {
+        notice.textContent = `Created ${sessionDisplayLabel(sessions[id])} from ${sourceLabel}. Test parameters were copied; recorded water-depth data was not.`;
+        notice.hidden = false;
+      }
+      openParametersForEditing('testNumber');
+      return id;
+    }
+
     function updateTabsUI() {
       // Prefer rendering into the slide-out sessions panel; fall back to the inline tabsList if present
       const target = document.getElementById('sessionsList') || document.getElementById('tabsList');
@@ -865,16 +1047,58 @@
         li.style.marginBottom = '8px';
         const label = (s.locationId ? s.locationId : 'New') + (s.testNumber ? ` — ${s.testNumber}` : '');
         const btnMain = document.createElement('button');
-        btnMain.className = 'tab' + (s.id === activeSessionId ? ' active' : '');
+        btnMain.className = 'tab session-tab' + (s.id === activeSessionId ? ' active' : '');
         btnMain.type = 'button';
         btnMain.textContent = label;
         btnMain.style.flex = '1';
         btnMain.style.textAlign = 'left';
+        btnMain.title = 'Click to activate. Long-press to duplicate test parameters into the next run.';
+        btnMain.setAttribute('aria-label', `${label}. Click to activate; long-press to duplicate parameters.`);
+
+        let longPressTimer = null;
+        let longPressTriggered = false;
+        let pointerStart = null;
+        const cancelLongPress = () => {
+          if (longPressTimer) clearTimeout(longPressTimer);
+          longPressTimer = null;
+          pointerStart = null;
+          btnMain.classList.remove('is-long-pressing');
+        };
+        const triggerLongPress = () => {
+          if (longPressTriggered) return;
+          longPressTriggered = true;
+          cancelLongPress();
+          if (navigator.vibrate) navigator.vibrate(30);
+          duplicateSessionParameters(s.id);
+        };
+        btnMain.addEventListener('pointerdown', event => {
+          if (event.pointerType === 'mouse' && event.button !== 0) return;
+          longPressTriggered = false;
+          pointerStart = { x: event.clientX, y: event.clientY };
+          btnMain.classList.add('is-long-pressing');
+          longPressTimer = setTimeout(triggerLongPress, 650);
+        });
+        btnMain.addEventListener('pointermove', event => {
+          if (!pointerStart) return;
+          if (Math.hypot(event.clientX - pointerStart.x, event.clientY - pointerStart.y) > 12) cancelLongPress();
+        });
+        ['pointerup', 'pointercancel', 'pointerleave'].forEach(eventName => {
+          btnMain.addEventListener(eventName, cancelLongPress);
+        });
+        btnMain.addEventListener('contextmenu', event => {
+          event.preventDefault();
+          triggerLongPress();
+        });
         // Activate session and close sessions panel (if present) so user can immediately use it
-        btnMain.addEventListener('click', () => {
+        btnMain.addEventListener('click', event => {
+          if (longPressTriggered) {
+            event.preventDefault();
+            event.stopPropagation();
+            return;
+          }
+          hideDuplicateNotice();
           activateSession(s.id);
-          const panel = document.getElementById('sessions');
-          if (panel) { panel.classList.remove('open'); panel.setAttribute('aria-hidden','true'); document.body.classList.remove('sessions-open'); }
+          closeSessionsPanel();
         });
         const close = document.createElement('button');
         close.type = 'button';
@@ -897,27 +1121,9 @@
 
     // Wire new test control — create and close sessions panel then open parameters for entry
     document.getElementById('newTestBtn').addEventListener('click', () => {
+      hideDuplicateNotice();
       createNewSession();
-
-      // close sessions panel
-      const sessionsPanel = document.getElementById('sessions');
-      if (sessionsPanel) {
-        sessionsPanel.classList.remove('open');
-        sessionsPanel.setAttribute('aria-hidden', 'true');
-        document.body.classList.remove('sessions-open');
-      }
-
-      // open parameters panel so user can enter test details immediately
-      const params = document.getElementById('parameters');
-      if (params) {
-        params.classList.add('open');
-        params.setAttribute('aria-hidden', 'false');
-        document.body.classList.add('panel-open');
-      }
-
-      // focus first field and refresh start button state
-      const loc = document.getElementById('locationId');
-      if (loc) loc.focus();
+      openParametersForEditing('locationId');
       checkStartButton();
     });
 
@@ -936,6 +1142,7 @@
     let widthBottomIndependent = false;
     let testStarted = false;
     let hasEverStarted = false; // new flag
+    let testEnded = false;
 
     // Local Storage Keys
     const STORAGE_KEY = 'depthLoggerTests';
@@ -965,8 +1172,9 @@
          voidRatio: document.getElementById('voidRatio').value,
          strataDescription: document.getElementById('strataDescription').value,
          pitDetails: document.getElementById('pitDetails').value,
-        points: points,
-        testStarted: testStarted
+         points: points,
+        testStarted: testStarted,
+        testEnded: testEnded
        };
      }
 
@@ -985,7 +1193,8 @@
       document.getElementById('strataDescription').value = data.strataDescription || '';
       document.getElementById('pitDetails').value = data.pitDetails || '';
       points = data.points || [];
-      testStarted = !!(data.testStarted || (points && points.length > 0));
+      testEnded = !!data.testEnded;
+      testStarted = !testEnded && !!(data.testStarted || (points && points.length > 0));
       hasEverStarted = testStarted;
     }
 
@@ -1013,6 +1222,7 @@
           isPaused: false,
           testStarted: false,
           hasEverStarted: false,
+          testEnded: false,
           currentTestId: null
         };
         persistSessions();
@@ -1024,6 +1234,7 @@
         lengthBottomIndependent = false;
         widthBottomIndependent = false;
         testStarted = false;
+        testEnded = false;
         setCurrentData({});
         document.getElementById('lengthBottom').value = '';
         document.getElementById('widthBottom').value = '';
@@ -1039,6 +1250,7 @@
       pausedTime = 0;
       pauseStart = undefined;
       isPaused = false;
+      testEnded = false;
       if (timerInterval) clearInterval(timerInterval);
       timerInterval = null;
       updateUIState();
@@ -1047,9 +1259,16 @@
 
     // Update UI state
     function updateUIState() {
-      document.getElementById('locationId').disabled = testStarted;
-      document.getElementById('testNumber').disabled = testStarted;
-      document.getElementById('stopTimer').disabled = points.length === 0;
+      const locked = testStarted || testEnded;
+      document.getElementById('locationId').disabled = locked;
+      document.getElementById('testNumber').disabled = locked;
+      document.getElementById('depthInput').disabled = testEnded;
+      document.getElementById('stopTimer').disabled = testEnded || points.length === 0;
+      const rerunButton = document.getElementById('rerunTest');
+      rerunButton.disabled = !testEnded;
+      rerunButton.title = testEnded
+        ? 'Create the next run with these test parameters and no recorded readings'
+        : 'Available after the current test has ended';
     }
 
     // Check Start button state
@@ -1060,6 +1279,11 @@
       const widthTop = document.getElementById('widthTop').value.trim();
       const depthExcavation = document.getElementById('depthExcavation').value.trim();
       const btn = document.getElementById('startPauseBtn');
+      if (testEnded) {
+        btn.disabled = true;
+        btn.textContent = 'Test ended';
+        return;
+      }
       if (!testStarted) {
         btn.disabled = !locationId || !testNumber || !lengthTop || !widthTop || !depthExcavation;
         btn.textContent = 'Start';
@@ -1107,6 +1331,7 @@
         isPaused = false;
         testStarted = true;
         hasEverStarted = true;
+        testEnded = false;
         if (timerInterval) clearInterval(timerInterval);
         timerInterval = setInterval(updateTimer, 1000);
         // update display immediately so user doesn't wait up to 1s
@@ -1174,14 +1399,37 @@
       document.getElementById('timer').textContent = '00:00:00';
       testStarted = false;
       hasEverStarted = false; // reset so next press behaves like a fresh Start
+      testEnded = true;
       autoSaveCurrent();
       checkStartButton();
       updateUIState();
     });
 
+    document.getElementById('rerunTest').addEventListener('click', () => {
+      if (!testEnded || !activeSessionId) return;
+      duplicateSessionParameters(activeSessionId);
+    });
+
     // Load timer state to paused at latest time or derive from first reading
     function loadTimerState() {
       const btn = document.getElementById('startPauseBtn');
+
+      if (testEnded) {
+        document.getElementById('timer').textContent = '00:00:00';
+        startTime = undefined;
+        pausedTime = 0;
+        pauseStart = undefined;
+        isPaused = false;
+        testStarted = false;
+        hasEverStarted = false;
+        if (timerInterval) {
+          clearInterval(timerInterval);
+          timerInterval = null;
+        }
+        updateUIState();
+        checkStartButton();
+        return;
+      }
 
       // If we have recorded points we derive the timer from the earliest reading timestamp.
       if (points.length > 0) {
@@ -1260,6 +1508,7 @@
 
     // Record point
     function recordPoint() {
+      if (testEnded) return;
       const depthEl = document.getElementById('depthInput');
       const depth = parseFloat(depthEl.value);
       const depthErrorEl = document.getElementById('depthError');
@@ -1290,6 +1539,7 @@
         isPaused = false;
         testStarted = true;
         hasEverStarted = true;
+        testEnded = false;
         // ensure interval runs
         if (timerInterval) clearInterval(timerInterval);
         timerInterval = setInterval(updateTimer, 1000);
@@ -1466,7 +1716,10 @@
         checkbox.name = 'exportSession';
         checkbox.value = session.id;
         checkbox.checked = session.id === activeSessionId;
-        checkbox.addEventListener('change', () => { error.hidden = true; });
+        checkbox.addEventListener('change', () => {
+          error.hidden = true;
+          updateExportGroupingOption();
+        });
 
         const copy = document.createElement('span');
         const name = document.createElement('span');
@@ -1490,6 +1743,28 @@
         choice.append(checkbox, copy);
         list.appendChild(choice);
       });
+      updateExportGroupingOption();
+    }
+
+    function selectedExportSessionIds() {
+      return Array.from(
+        document.querySelectorAll('input[name="exportSession"]:checked'),
+        checkbox => checkbox.value
+      );
+    }
+
+    function updateExportGroupingOption() {
+      const checkbox = document.getElementById('exportGroupSameLocation');
+      const help = document.getElementById('exportGroupSameLocationHelp');
+      const selected = selectedExportSessionIds().map(id => sessions[id]).filter(Boolean);
+      const locations = [...new Set(selected.map(session => String(session.locationId || '').trim().toLocaleLowerCase()).filter(Boolean))];
+      const eligible = selected.length >= 2 && selected.length <= 3 && locations.length === 1
+        && selected.every(session => String(session.locationId || '').trim());
+      checkbox.disabled = !eligible;
+      if (!eligible) checkbox.checked = false;
+      help.textContent = eligible
+        ? `Create one grouped worksheet for ${selected.length} runs at ${String(selected[0].locationId).trim()}: one construction graphic, ${selected.length} graphs and analysis blocks, followed by complete data pages.`
+        : 'Select two or three sessions with the same nonblank Location ID to enable this layout.';
     }
 
     function collectReportSessions(sessionIds) {
@@ -1513,7 +1788,7 @@
       if (dialog.open) dialog.close();
     }
 
-    async function exportSelectedSessions(sessionIds) {
+    async function exportSelectedSessions(sessionIds, options = {}) {
       const exportButton = document.getElementById('exportButton');
       const confirmButton = document.getElementById('exportSessionsConfirm');
       const originalLabel = exportButton.textContent;
@@ -1522,7 +1797,7 @@
       exportButton.textContent = 'Building Excel report…';
       closeExportSessionsDialog();
       try {
-        await window.DepthLoggerExcel.buildAndDownload(collectReportSessions(sessionIds));
+        await window.DepthLoggerExcel.buildAndDownload(collectReportSessions(sessionIds), options);
       } catch (error) {
         console.error('Excel report export failed:', error);
         alert(error && error.message ? error.message : 'The Excel report could not be created.');
@@ -1538,15 +1813,14 @@
     document.getElementById('exportSessionsCancel').addEventListener('click', closeExportSessionsDialog);
     document.getElementById('exportSessionsForm').addEventListener('submit', (event) => {
       event.preventDefault();
-      const selectedSessionIds = Array.from(
-        document.querySelectorAll('input[name="exportSession"]:checked'),
-        checkbox => checkbox.value
-      );
+      const selectedSessionIds = selectedExportSessionIds();
       if (selectedSessionIds.length === 0) {
         document.getElementById('exportSessionsError').hidden = false;
         return;
       }
-      exportSelectedSessions(selectedSessionIds);
+      exportSelectedSessions(selectedSessionIds, {
+        groupSameLocation: document.getElementById('exportGroupSameLocation').checked,
+      });
     });
 
     // Clear current
@@ -1766,8 +2040,22 @@
         assert(results.initialHead === 355, 'Initial head calculation failed');
         assert(Number.isFinite(results.time75) && Number.isFinite(results.time25), 'Threshold interpolation failed');
         assert(Number.isFinite(results.infiltrationMSec), 'Infiltration result calculation failed');
+        assert(!window.DepthLoggerExcel._test.requiresManualInfiltrationRate(sampleSession.points, results), 'Completed drainage should use interpolated analysis');
+        const stalledSession = {
+          ...sampleSession,
+          points: [
+            { timeMins: 0, depth: 295 },
+            { timeMins: 10, depth: 330 },
+            { timeMins: 40, depth: 360 }
+          ]
+        };
+        const stalledResults = window.DepthLoggerExcel._test.calculateResults(stalledSession);
+        assert(window.DepthLoggerExcel._test.requiresManualInfiltrationRate(stalledSession.points, stalledResults), 'Stalled drainage should require manual analysis');
         const names = window.DepthLoggerExcel._test.buildSheetNames([sampleSession, sampleSession]);
         assert(names.length === 2 && names[0] !== names[1], 'Duplicate worksheet naming failed');
+        assert(incrementTestNumberLabel('1') === '2', 'Numeric run increment failed');
+        assert(incrementTestNumberLabel('Test 1') === 'Test 2', 'Labelled run increment failed');
+        assert(incrementTestNumberLabel('Run 009') === 'Run 010', 'Padded run increment failed');
         console.log(`Self-tests passed: ${passed}`);
         console.groupEnd();
       } catch (err) {
